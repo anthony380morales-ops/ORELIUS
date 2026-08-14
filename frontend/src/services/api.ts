@@ -1,18 +1,93 @@
 import axios from 'axios'
 import type { SystemStatus, AuditLog, SystemMetrics, Conversation, Message } from '../types'
 
+const ACCESS_KEY = 'access_token'
+const REFRESH_KEY = 'refresh_token'
+
+export const tokenStore = {
+  get access() { return localStorage.getItem(ACCESS_KEY) },
+  get refresh() { return localStorage.getItem(REFRESH_KEY) },
+  set(access: string, refresh: string) {
+    localStorage.setItem(ACCESS_KEY, access)
+    localStorage.setItem(REFRESH_KEY, refresh)
+  },
+  clear() {
+    localStorage.removeItem(ACCESS_KEY)
+    localStorage.removeItem(REFRESH_KEY)
+  },
+  get isAuthed() { return !!localStorage.getItem(ACCESS_KEY) },
+}
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
 })
 
+// Attach the access token to every request
+api.interceptors.request.use((config) => {
+  const token = tokenStore.access
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// On 401, try one silent refresh, then replay the request; otherwise force re-login
+let refreshing: Promise<string | null> | null = null
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refresh = tokenStore.refresh
+  if (!refresh) return null
+  try {
+    const resp = await axios.post('/api/auth/refresh', { refresh_token: refresh })
+    tokenStore.set(resp.data.access_token, resp.data.refresh_token)
+    return resp.data.access_token
+  } catch {
+    tokenStore.clear()
+    return null
+  }
+}
+
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const original = error.config || {}
+    const isAuthCall = (original.url || '').includes('/auth/')
+    if (error.response?.status === 401 && !original._retried && !isAuthCall) {
+      original._retried = true
+      refreshing = refreshing || refreshAccessToken()
+      const newToken = await refreshing
+      refreshing = null
+      if (newToken) {
+        original.headers = original.headers || {}
+        original.headers.Authorization = `Bearer ${newToken}`
+        return api(original)
+      }
+      // refresh failed — signal the app to show the login screen
+      window.dispatchEvent(new CustomEvent('orelius:logout'))
+    }
+    return Promise.reject(error)
+  }
+)
+
+export const authApi = {
+  login: async (userId: string, password: string) => {
+    const resp = await axios.post('/api/auth/login', { user_id: userId, password })
+    tokenStore.set(resp.data.access_token, resp.data.refresh_token)
+    return resp.data
+  },
+  logout: () => {
+    tokenStore.clear()
+    window.dispatchEvent(new CustomEvent('orelius:logout'))
+  },
+  me: async () => {
+    const resp = await api.get('/auth/me')
+    return resp.data
+  },
+}
+
 export const chatApi = {
-  sendMessage: async (userId: string, message: string, source: string = 'web') => {
-    const response = await api.post('/chat', {
-      user_id: userId,
-      message,
-      source,
-    })
+  // user_id now comes from the JWT on the server; kept in the signature for callers
+  sendMessage: async (_userId: string, message: string, source: string = 'web') => {
+    const response = await api.post('/chat', { message, source })
     return response.data
   },
 
@@ -42,6 +117,11 @@ export const systemApi = {
     const response = await api.get('/system/logs', { params: { limit } })
     return response.data
   },
+
+  getOptimization: async () => {
+    const response = await api.get('/system/optimization')
+    return response.data
+  },
 }
 
 export const automationApi = {
@@ -57,49 +137,6 @@ export const automationApi = {
 
   triggerJob: async (jobId: string) => {
     const response = await api.post(`/automation/trigger/${jobId}`)
-    return response.data
-  },
-}
-
-export const manusApi = {
-  getDashboardMetrics: async () => {
-    const response = await api.get('/manus/dashboard/metrics')
-    return response.data
-  },
-
-  getTasks: async (status?: string, taskType?: string, limit: number = 50) => {
-    const response = await api.get('/manus/tasks', {
-      params: { status, task_type: taskType, limit }
-    })
-    return response.data
-  },
-
-  getTask: async (taskId: number) => {
-    const response = await api.get(`/manus/tasks/${taskId}`)
-    return response.data
-  },
-
-  createTask: async (taskType: string, customInstructions?: string, context?: any) => {
-    const response = await api.post('/manus/tasks', {
-      task_type: taskType,
-      custom_instructions: customInstructions,
-      context
-    })
-    return response.data
-  },
-
-  retryTask: async (taskId: number) => {
-    const response = await api.post(`/manus/tasks/${taskId}/retry`)
-    return response.data
-  },
-
-  getScheduledJobs: async () => {
-    const response = await api.get('/manus/scheduler/jobs')
-    return response.data
-  },
-
-  getHealthCheck: async () => {
-    const response = await api.get('/manus/health')
     return response.data
   },
 }

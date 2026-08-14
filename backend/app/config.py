@@ -45,9 +45,9 @@ class Settings(BaseSettings):
     lucius_api_key: str = ""
     lucius_shared_secret: str = ""
 
-    # Telegram
-    telegram_bot_token: str
-    telegram_allowed_users: str = ""  # Comma-separated user IDs
+    # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
+    telegram_bot_token: str = ""
+    telegram_allowed_users: str = ""  # Comma-separated user IDs allowed to log in
 
     # Google Sheets
     google_sheets_credentials_file: str = "./google-credentials.json"

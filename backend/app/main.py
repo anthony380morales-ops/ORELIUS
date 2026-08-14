@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from .config import settings
 from .database import init_db
 from .utils.logger import logger
-from .api.routes import chat, system, auth, manus  # automation removed - replaced by Manus AI
+from .api.routes import chat, system, auth
 import os
 
 # Create logs directory
@@ -36,44 +36,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(telegram_bot.start())
         logger.info("Telegram bot started")
 
-    # Initialize Manus AI integration
-    from .services.manus_client import get_manus_client
-    from .services.manus_scheduler import get_manus_scheduler
-    from .database import AsyncSessionLocal
-
-    logger.info("Initializing Manus AI integration...")
-    manus_client = get_manus_client()
-
-    # Validate Manus API
-    is_valid = await manus_client.validate_api_key()
-    logger.info(f"Manus AI API key validation: {'success' if is_valid else 'failed'}")
-
-    # Setup scheduler
-    manus_scheduler = get_manus_scheduler()
-    await manus_scheduler.setup(AsyncSessionLocal)
-    logger.info("Manus scheduler started - Daily tasks at 8:00 AM PST")
-
-    # Register webhook with Manus
-    base_url = os.getenv("BASE_URL", "http://localhost:8000")
-    webhook_url = f"{base_url}/api/manus/webhooks/manus"
-    try:
-        await manus_client.register_webhook(webhook_url)
-        logger.info(f"Manus webhook registered: {webhook_url}")
-    except Exception as e:
-        logger.warning(f"Failed to register Manus webhook: {e}")
-
     yield
 
     # Shutdown
-    logger.info("Shutting down O.R.E.I.L.U.S. system...")
-
-    # Stop Manus scheduler
-    manus_scheduler.shutdown()
-    logger.info("Manus scheduler stopped")
-
-    # Close Manus client
-    await manus_client.close()
-    logger.info("Manus AI client closed")
+    logger.info("Shutting down O.R.E.L.I.U.S. system...")
 
     # Stop Telegram bot
     if settings.telegram_bot_token:
@@ -110,8 +76,6 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api", tags=["Authentication"])  # No auth required for login
 app.include_router(chat.router, prefix="/api", tags=["Chat"])  # Auth will be added to individual routes
 app.include_router(system.router, prefix="/api", tags=["System"])  # Auth will be added to individual routes
-# app.include_router(automation.router, prefix="/api", tags=["Automation"])  # REMOVED - Replaced by Manus AI
-app.include_router(manus.router, prefix="/api/manus", tags=["Manus AI"])  # Manus AI integration
 
 # WebSocket endpoint
 from .api.websocket import websocket_endpoint

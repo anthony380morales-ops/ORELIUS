@@ -1,17 +1,29 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import Login from './components/Login'
+import { tokenStore, authApi } from './services/api'
 import Dashboard from './components/MissionControl/Dashboard'
 import ChatInterface from './components/Chat/ChatInterface'
 import AuditLogs from './components/MissionControl/AuditLogs'
 import SystemHealth from './components/MissionControl/SystemHealth'
 import Automation from './components/MissionControl/Automation'
-import ManusDashboard from './components/MissionControl/ManusDashboard'
 import Starfield from './components/Starfield'
 import ShootingStars from './components/ShootingStars'
 
-type View = 'dashboard' | 'automation' | 'manus' | 'chat' | 'logs' | 'health'
+type View = 'dashboard' | 'automation' | 'chat' | 'logs' | 'health'
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
+  const [authed, setAuthed] = useState(tokenStore.isAuthed)
+
+  useEffect(() => {
+    const onLogout = () => setAuthed(false)
+    window.addEventListener('orelius:logout', onLogout)
+    return () => window.removeEventListener('orelius:logout', onLogout)
+  }, [])
+
+  if (!authed) {
+    return <Login onSuccess={() => setAuthed(true)} />
+  }
 
   const renderView = () => {
     switch (currentView) {
@@ -19,8 +31,6 @@ function App() {
         return <Dashboard />
       case 'automation':
         return <Automation />
-      case 'manus':
-        return <ManusDashboard />
       case 'chat':
         return <ChatInterface />
       case 'logs':
@@ -82,19 +92,6 @@ function App() {
           </button>
 
           <button
-            onClick={() => setCurrentView('manus')}
-            className={`group w-full text-left px-4 py-3 rounded-xl mb-2 transition-all duration-300 ${
-              currentView === 'manus'
-                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/30 border border-white/20'
-                : 'text-white/70 hover:bg-white/10 hover:text-white hover:border-white/20 border border-transparent'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <span className="font-semibold">Manus AI</span>
-            </div>
-          </button>
-
-          <button
             onClick={() => setCurrentView('chat')}
             className={`group w-full text-left px-4 py-3 rounded-xl mb-2 transition-all duration-300 ${
               currentView === 'chat'
@@ -142,10 +139,16 @@ function App() {
                 <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse"></div>
                 <div className="absolute inset-0 h-2 w-2 rounded-full bg-green-400/50 animate-ping"></div>
               </div>
-              <span className="text-white/80 font-medium">Manus AI Active</span>
+              <span className="text-white/80 font-medium">ORELIUS Online</span>
             </div>
             <div className="text-white/50 font-semibold">Version 0.4.0</div>
           </div>
+          <button
+            onClick={() => authApi.logout()}
+            className="mt-3 w-full rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-white/60 hover:text-white hover:bg-white/10 transition"
+          >
+            Sign out
+          </button>
         </div>
       </div>
 
