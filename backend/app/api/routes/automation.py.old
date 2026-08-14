@@ -1,0 +1,92 @@
+"""
+Automation API endpoints
+"""
+from fastapi import APIRouter, HTTPException
+from typing import Dict, Any, List
+from loguru import logger
+
+from ...automation.scheduler import automation_scheduler
+from ...automation.content_scanner import run_content_scan
+from ...automation.government_intel import run_government_scan
+
+router = APIRouter()
+
+
+@router.get("/automation/jobs")
+async def get_scheduled_jobs() -> Dict[str, Any]:
+    """Get all scheduled automation jobs"""
+    try:
+        jobs = automation_scheduler.get_jobs()
+
+        job_list = []
+        for job in jobs:
+            job_list.append({
+                "id": job.id,
+                "name": job.name,
+                "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+                "trigger": str(job.trigger),
+            })
+
+        return {
+            "success": True,
+            "jobs": job_list,
+            "count": len(job_list)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/automation/trigger/{job_id}")
+async def trigger_job(job_id: str) -> Dict[str, Any]:
+    """Manually trigger a scheduled job"""
+    try:
+        if job_id == "content_trend_scanner":
+            logger.info(f"Manually triggering Content Trend Scanner...")
+            result = await run_content_scan()
+            return {
+                "success": True,
+                "job_id": job_id,
+                "result": result
+            }
+        elif job_id == "government_intel_scanner":
+            logger.info(f"Manually triggering Government Intel Scanner...")
+            result = await run_government_scan()
+            return {
+                "success": True,
+                "job_id": job_id,
+                "result": result
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to trigger job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/automation/status")
+async def get_automation_status() -> Dict[str, Any]:
+    """Get automation system status"""
+    try:
+        jobs = automation_scheduler.get_jobs()
+
+        return {
+            "success": True,
+            "scheduler_running": automation_scheduler.scheduler.running if automation_scheduler.scheduler else False,
+            "jobs_scheduled": len(jobs),
+            "timezone": str(automation_scheduler.timezone),
+            "jobs": [
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run": job.next_run_time.isoformat() if job.next_run_time else None
+                }
+                for job in jobs
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Failed to get automation status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

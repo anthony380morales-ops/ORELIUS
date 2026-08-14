@@ -1,0 +1,83 @@
+================================================================================
+HOW TO ACCESS YOUR O.R.E.I.L.U.S. DASHBOARD
+================================================================================
+
+Your system has TWO parts:
+
+1. BACKEND (Runs 24/7 silently in background)
+   - URL: http://localhost:8000
+   - Handles: Automation, AI, Telegram bot, scheduling
+   - Status: ✓ ALWAYS RUNNING (no window needed)
+
+2. FRONTEND (Dashboard - Start when you want to use it)
+   - URL: http://localhost:3000
+   - Handles: Visual interface, chat, controls
+   - Status: Start it when needed (see below)
+
+================================================================================
+TO ACCESS THE DASHBOARD:
+================================================================================
+
+OPTION 1: Double-click this file (easiest):
+   START_DASHBOARD.bat
+
+   - Opens your browser automatically
+   - Starts the frontend
+   - Keep the window open while using dashboard
+
+OPTION 2: Manual start:
+   1. Open PowerShell
+   2. Run: cd C:\Users\Victoria\oreilus\frontend
+   3. Run: npm run dev
+   4. Open browser: http://localhost:3000
+   5. Keep PowerShell window open while using dashboard
+
+================================================================================
+WHEN TO USE THE DASHBOARD:
+================================================================================
+
+You only need the dashboard when you want to:
+- Chat with O.R.E.I.L.U.S. through the web interface
+- View system metrics and logs
+- Manually trigger automation tasks
+- Check automation status
+
+You DON'T need it for:
+- Daily automation (runs automatically at 7 AM & 8 AM PST)
+- Telegram bot (works independently)
+- 24/7 operation (backend handles this)
+
+================================================================================
+OTHER WAYS TO INTERACT WITH O.R.E.I.L.U.S.:
+================================================================================
+
+1. TELEGRAM BOT
+   - Message your bot anytime
+   - Works without the dashboard
+   - Commands: /start, /status, /help
+
+2. DIRECT API
+   - Check status: http://localhost:8000
+   - Trigger content scan:
+     curl -X POST http://localhost:8000/api/automation/trigger/content_trend_scanner
+   - Trigger intel scan:
+     curl -X POST http://localhost:8000/api/automation/trigger/government_intel_scanner
+
+3. GOOGLE SHEETS
+   - View automation results directly in your sheets
+   - Content: https://docs.google.com/spreadsheets/d/1yGYSpeD8AjHYtZLqJ0nVVAb7KOKm1EwDq1VJJLROxFw
+   - Intel: https://docs.google.com/spreadsheets/d/1pHSIlyFwAEIHEs4L15S_i1nTsCRX58ISNNyH0Xw_7Fo
+
+================================================================================
+SUMMARY:
+================================================================================
+
+✓ Backend: ALWAYS RUNNING (close all windows, it continues)
+✓ Automation: RUNS AUTOMATICALLY at 7 AM & 8 AM PST
+✓ Dashboard: START WHEN YOU WANT TO USE IT (double-click START_DASHBOARD.bat)
+✓ Close dashboard window when done (backend keeps running)
+
+You can now safely close all PowerShell windows. The backend is running
+in the background and will continue 24/7.
+
+================================================================================

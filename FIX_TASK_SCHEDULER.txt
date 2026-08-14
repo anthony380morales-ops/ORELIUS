@@ -1,0 +1,47 @@
+================================================================================
+HOW TO FIX TASK SCHEDULER FOR 24/7 OPERATION
+================================================================================
+
+The task is already created, you just need to change one setting.
+
+STEPS:
+--------------------------------------------------------------------------------
+1. Press Win + R
+2. Type: taskschd.msc
+3. Press Enter (Task Scheduler opens)
+
+4. In the left panel, click "Task Scheduler Library"
+
+5. Find the task: "O.R.E.I.L.U.S. Backend Service"
+
+6. Right-click on it → Select "Properties"
+
+7. Go to the "General" tab
+
+8. Change the radio button from:
+   ○ Run only when user is logged on
+
+   TO:
+
+   ● Run whether user is logged on or not
+
+9. Also make sure these are CHECKED:
+   ☑ Run with highest privileges
+
+10. Click "OK"
+
+11. Windows will ask for your password → Enter it
+
+12. Done! Now it will run 24/7 even when logged out.
+
+================================================================================
+TO TEST IT WORKS:
+================================================================================
+
+1. Right-click the task → "Run"
+2. Check if backend is running: http://localhost:8000
+3. If it works, you're all set!
+
+Optional: Restart your computer to verify it auto-starts.
+
+================================================================================

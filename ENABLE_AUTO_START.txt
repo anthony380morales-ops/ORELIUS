@@ -1,0 +1,82 @@
+================================================================================
+ENABLE AUTO-START ON BOOT (One-Time Setup)
+================================================================================
+
+The automated setup requires Administrator privileges. Here's how to do it:
+
+METHOD 1: Run the Automated Setup (Easiest)
+--------------------------------------------------------------------------------
+1. Right-click on this file: setup_24_7.bat
+2. Select "Run as administrator"
+3. Click "Yes" when Windows asks for permission
+4. The script will configure everything automatically
+
+METHOD 2: Manual Import (If Method 1 doesn't work)
+--------------------------------------------------------------------------------
+1. Press Win + R
+2. Type: taskschd.msc
+3. Press Enter (Task Scheduler opens)
+4. Click "Action" menu → "Import Task..."
+5. Browse to: C:\Users\Victoria\oreilus\OREILUS_Task_Scheduler.xml
+6. Click "Open"
+7. Click "OK"
+8. Enter your Windows password if prompted
+
+METHOD 3: Create Task Manually (If Methods 1 & 2 fail)
+--------------------------------------------------------------------------------
+1. Open Task Scheduler (Win + R → taskschd.msc)
+2. Click "Create Task" (not "Create Basic Task")
+
+GENERAL TAB:
+- Name: O.R.E.I.L.U.S. Backend Service
+- Description: Autonomous AI agent - runs 24/7
+- ☑ Run whether user is logged on or not
+- ☑ Run with highest privileges
+
+TRIGGERS TAB:
+Click "New":
+- Begin the task: At startup
+- Delay task for: 30 seconds
+- ☑ Enabled
+
+ACTIONS TAB:
+Click "New":
+- Action: Start a program
+- Program/script: C:\Users\Victoria\oreilus\backend\venv\Scripts\python.exe
+- Add arguments: "C:\Users\Victoria\oreilus\start_oreilus_service.py"
+- Start in: C:\Users\Victoria\oreilus
+
+CONDITIONS TAB:
+- ☐ Start the task only if the computer is on AC power (UNCHECK THIS!)
+- ☑ Start only if network is available
+
+SETTINGS TAB:
+- ☑ Allow task to be run on demand
+- ☑ Run task as soon as possible after a scheduled start is missed
+- If the task is already running: Do not start a new instance
+
+3. Click OK and enter your Windows password
+
+================================================================================
+VERIFY IT'S WORKING
+================================================================================
+
+After setup, restart your computer to test:
+1. Restart Windows
+2. Wait 1 minute after login
+3. Open browser to: http://localhost:8000
+4. Should show: {"system":"O.R.E.I.L.U.S.","version":"0.1.0","status":"operational"}
+
+If it works, you're done! O.R.E.I.L.U.S. will now start automatically.
+
+================================================================================
+CURRENTLY RUNNING
+================================================================================
+
+Your backend is ALREADY RUNNING now. You don't need to set up auto-start
+immediately - the system is operational and will run the daily automation
+tomorrow at 7 AM and 8 AM PST.
+
+The auto-start setup is just so it starts automatically after Windows reboots.
+
+================================================================================
