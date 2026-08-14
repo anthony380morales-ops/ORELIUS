@@ -1,47 +1,49 @@
 """
-Claude API Client Wrapper
-Handles all communication with Anthropic's Claude API
+Claude API Client Wrapper (O.R.E.L.I.U.S. brain)
+Model: Claude Haiku 4.5 — cheapest + most efficient Claude model for daily use.
+Handles streaming, prompt caching, dynamic output caps, and usage capture.
 """
 from anthropic import AsyncAnthropic
 from typing import AsyncGenerator, List, Dict, Optional
 from ..config import settings
 from ..utils.logger import logger
-import tiktoken
+from .token_optimizer import token_optimizer
 
 
 class ClaudeClient:
-    """
-    Wrapper for Claude API with streaming support and token management
-    """
+    """Wrapper for the Claude API with prompt caching + credit tracking."""
 
     def __init__(self):
         self.client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        self.model = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5
-        self.max_tokens = 16000  # Max tokens for response (doubled for longer responses)
-        self.temperature = 0.7
+        self.model = settings.oreilus_model            # claude-haiku-4-5
+        self.max_tokens = settings.oreilus_max_tokens
+        self.temperature = settings.oreilus_temperature
+
+    def _build_system(self, system_prompt: str):
+        """Return the system field, marking it cacheable so the persona prefix is
+        billed at ~0.1x on reuse (huge saving for a daily-use assistant)."""
+        if settings.enable_prompt_caching:
+            return [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        return system_prompt
 
     async def chat(
         self,
         messages: List[Dict[str, str]],
         system_prompt: str,
         stream: bool = False,
+        max_tokens: Optional[int] = None,
     ) -> str | AsyncGenerator[str, None]:
-        """
-        Send a chat message to Claude
-
-        Args:
-            messages: List of message dicts with 'role' and 'content'
-            system_prompt: System prompt to set context
-            stream: If True, return streaming generator
-
-        Returns:
-            Full response text or streaming generator
-        """
+        """Send a chat message to Claude (streaming or complete)."""
         try:
             if stream:
-                return self._stream_chat(messages, system_prompt)
-            else:
-                return await self._complete_chat(messages, system_prompt)
+                return self._stream_chat(messages, system_prompt, max_tokens)
+            return await self._complete_chat(messages, system_prompt, max_tokens)
         except Exception as e:
             logger.error(f"Claude API error: {e}")
             raise
@@ -50,17 +52,16 @@ class ClaudeClient:
         self,
         messages: List[Dict[str, str]],
         system_prompt: str,
+        max_tokens: Optional[int],
     ) -> str:
-        """Get complete chat response (non-streaming)"""
         response = await self.client.messages.create(
             model=self.model,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tokens or self.max_tokens,
             temperature=self.temperature,
-            system=system_prompt,
+            system=self._build_system(system_prompt),
             messages=messages,
         )
-
-        # Extract text from response
+        self._record_usage(response.usage)
         if response.content and len(response.content) > 0:
             return response.content[0].text
         return ""
@@ -69,62 +70,42 @@ class ClaudeClient:
         self,
         messages: List[Dict[str, str]],
         system_prompt: str,
+        max_tokens: Optional[int],
     ) -> AsyncGenerator[str, None]:
-        """Get streaming chat response"""
         async with self.client.messages.stream(
             model=self.model,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tokens or self.max_tokens,
             temperature=self.temperature,
-            system=system_prompt,
+            system=self._build_system(system_prompt),
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
                 yield text
+            final = await stream.get_final_message()
+            self._record_usage(final.usage)
+
+    def _record_usage(self, usage) -> None:
+        """Log tokens + estimated USD cost to the credit tracker."""
+        try:
+            token_optimizer.usage.record_api_call(
+                input_tokens=getattr(usage, "input_tokens", 0) or 0,
+                output_tokens=getattr(usage, "output_tokens", 0) or 0,
+                cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+                cache_write_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            )
+        except Exception as e:  # noqa: BLE001 - never break a reply over accounting
+            logger.debug(f"usage record skipped: {e}")
 
     def count_tokens(self, text: str) -> int:
-        """
-        Estimate token count for text
-
-        Args:
-            text: Input text
-
-        Returns:
-            Estimated token count
-        """
-        try:
-            # Use tiktoken for estimation (Claude uses similar tokenization)
-            encoding = tiktoken.get_encoding("cl100k_base")
-            return len(encoding.encode(text))
-        except Exception as e:
-            logger.warning(f"Token counting failed: {e}")
-            # Fallback: rough estimate (1 token ≈ 4 characters)
-            return len(text) // 4
+        """Rough token estimate (~4 chars/token). Avoids an extra API round-trip."""
+        return max(1, len(text) // 4)
 
     def count_messages_tokens(self, messages: List[Dict[str, str]]) -> int:
-        """
-        Count total tokens in message list
-
-        Args:
-            messages: List of message dicts
-
-        Returns:
-            Total token count
-        """
-        total = 0
-        for msg in messages:
-            total += self.count_tokens(msg.get("content", ""))
-        return total
+        return sum(self.count_tokens(msg.get("content", "")) for msg in messages)
 
     async def validate_api_key(self) -> bool:
-        """
-        Validate that the Claude API key is working
-
-        Returns:
-            True if valid, False otherwise
-        """
         try:
-            # Send a simple test message
-            response = await self.client.messages.create(
+            await self.client.messages.create(
                 model=self.model,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "test"}],

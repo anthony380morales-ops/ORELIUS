@@ -46,7 +46,7 @@ function App() {
         <div className="p-6 border-b border-white/10 bg-gradient-to-br from-white/5 to-transparent">
           <div className="flex items-center gap-3 mb-2">
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">O.R.E.I.L.U.S.</h1>
+              <h1 className="text-2xl font-bold text-white tracking-tight">O.R.E.L.I.U.S.</h1>
               <div className="h-0.5 w-full bg-gradient-to-r from-blue-400 via-blue-300 to-transparent"></div>
             </div>
           </div>

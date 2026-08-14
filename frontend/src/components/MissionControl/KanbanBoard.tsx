@@ -9,7 +9,7 @@ interface Task {
 }
 
 export default function KanbanBoard() {
-  const [tasks, setTasks] = useState<Task[]>([
+  const [tasks] = useState<Task[]>([
     { id: '1', title: 'Phase 1: Core System', status: 'complete', priority: 'high' },
     { id: '2', title: 'Phase 2: Mission Control', status: 'complete', priority: 'high' },
     { id: '3', title: 'Phase 3: Automation Engine', status: 'in_progress', priority: 'high' },

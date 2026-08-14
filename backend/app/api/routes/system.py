@@ -16,6 +16,19 @@ import datetime
 router = APIRouter()
 
 
+@router.get("/system/optimization")
+async def get_optimization_stats():
+    """
+    Credit-saver stats: model in use, cache hit rates, token usage, estimated
+    USD cost and savings. Lets the Master see that ORELIUS is running lean.
+    """
+    try:
+        return oreilus_engine.optimization_stats()
+    except Exception as e:
+        logger.error(f"Optimization stats error: {e}")
+        return {"error": str(e)}
+
+
 @router.get("/system/status")
 async def get_system_status(db: AsyncSession = Depends(get_db)):
     """

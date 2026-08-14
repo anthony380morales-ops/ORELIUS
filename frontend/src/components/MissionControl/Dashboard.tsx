@@ -112,7 +112,7 @@ export default function Dashboard() {
           <StatCard
             icon="🛡️"
             label="Security Events"
-            value={metrics?.security.security_alerts || '0'}
+            value={(metrics?.security.security_alerts || 0).toLocaleString()}
             subtext="Alerts detected"
             color="from-red-600 to-red-800"
           />

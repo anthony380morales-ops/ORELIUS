@@ -33,6 +33,17 @@ export default {
           white: '#ffffff',     // Pure white
           'off-white': '#f8fafc', // Soft white
         },
+        // Athena design system — ORELIUS console
+        'athena': {
+          bg: '#060a14',        // near-black navy canvas
+          surface: '#0b1220',   // panel
+          'surface-2': '#111a2e', // raised panel
+          border: '#1c2740',    // hairline border
+          gold: '#e8c26a',      // warm champagne gold accent
+          'gold-soft': '#f2dca0',
+          text: '#e7ecf5',      // primary text
+          muted: '#8a97ad',     // secondary text
+        },
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

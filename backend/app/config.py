@@ -20,8 +20,30 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str = "redis://localhost:6379/0"
 
-    # Claude API
+    # Claude API (ORELIUS brain)
     anthropic_api_key: str
+    # Brain model: Claude Haiku 4.5 — cheapest + most efficient for high-volume daily use
+    oreilus_model: str = "claude-haiku-4-5"
+    oreilus_max_tokens: int = 1500          # tight cap keeps credits long-lasting
+    oreilus_report_max_tokens: int = 4096   # larger cap when a full report/plan is requested
+    oreilus_temperature: float = 0.7
+
+    # --- Token & credit optimization (the credit saver) ---
+    enable_prompt_caching: bool = True      # cache the persona prefix (~90% cheaper on reuse)
+    enable_response_cache: bool = True      # serve identical repeat questions from cache (0 credits)
+    response_cache_ttl: int = 3600          # seconds
+    response_cache_max_items: int = 500
+    max_history_messages: int = 12          # trim conversation history sent to the model
+    max_history_tokens: int = 6000
+    usage_log_path: str = "./logs/usage_tracker.json"
+
+    # --- LUCIUS shared memory (companion link) ---
+    shared_memory_path: str = "./shared_memory/orelius_lucius_memory.json"
+    shared_memory_max_items: int = 300
+    shared_memory_context_items: int = 6    # how many recent shared items to inject (keeps tokens low)
+    lucius_api_url: str = ""                # optional: LUCIUS HTTP endpoint for two-way sync
+    lucius_api_key: str = ""
+    lucius_shared_secret: str = ""
 
     # Telegram
     telegram_bot_token: str

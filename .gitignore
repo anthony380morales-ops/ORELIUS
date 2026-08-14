@@ -23,6 +23,8 @@ build/
 
 # --- Logs / runtime ---
 *.log
+logs/
+shared_memory/
 
 # --- Backups ---
 backup_automation_*/
