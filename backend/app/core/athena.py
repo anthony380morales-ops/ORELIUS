@@ -42,14 +42,16 @@ ATHENA_ACTIONS = ["brief", "once", "batch", "research", "autopilot", "status"]
 ATHENA_TOOL: Dict = {
     "name": "athena_design",
     "description": (
-        "Delegate any design, branding, visual, or content-creation work to ATHENA, "
-        "the Master's dedicated autonomous design agent. Use this whenever the Master "
-        "asks for something design related: creating or restyling visuals, graphics, "
-        "posts, branding, layouts, mockups, creative briefs, content research, or "
-        "running ATHENA's content pipeline. ATHENA works asynchronously on the "
-        "Master's own machine; calling this dispatches the job to her and she reports "
-        "back through your shared memory. Do NOT use this for plain questions you can "
-        "answer yourself — only for actual design/content production work."
+        "Delegate design and content work to ATHENA, the Master's autonomous Instagram "
+        "content agent that runs on his machine. ATHENA researches trends, creates "
+        "branded post designs, and publishes them (scheduling into her Later queue) — "
+        "everything she does revolves around Instagram posts for the Master's brand. "
+        "Use this whenever the Master asks to create, generate, design, or publish a "
+        "post; to run today's/daily content; to research content ideas; or for a "
+        "content plan. Calling this dispatches the job to ATHENA and she reports back "
+        "through your shared memory. Pick the correct `action` — it decides whether a "
+        "post is actually produced. Do NOT use this for plain questions you can answer "
+        "yourself."
     ),
     "input_schema": {
         "type": "object",
@@ -57,27 +59,33 @@ ATHENA_TOOL: Dict = {
             "brief": {
                 "type": "string",
                 "description": (
-                    "A clear, self-contained description of the design/content work for "
-                    "ATHENA — what to make, the goal, style, audience, and any specifics "
-                    "the Master gave. Write it as an instruction ATHENA can act on alone."
+                    "A clear, self-contained description of what the Master wants — the "
+                    "post idea, goal, theme, or any specifics he gave. Write it as an "
+                    "instruction ATHENA can act on alone."
                 ),
             },
             "action": {
                 "type": "string",
                 "enum": ATHENA_ACTIONS,
                 "description": (
-                    "How ATHENA should handle it: 'brief' (draft a plan/creative brief — "
-                    "the safe default), 'once' (produce one design/post now), 'batch' "
-                    "(produce several), 'research' (gather references/ideas first), "
-                    "'autopilot' (run her full autonomous pipeline), or 'status' (just "
-                    "report what she's doing)."
+                    "Choose carefully — this decides what ATHENA does:\n"
+                    "- 'once': create AND publish ONE post now. USE THIS for 'make a "
+                    "post', 'generate and publish today's post', 'post something'.\n"
+                    "- 'autopilot': run her full daily pipeline (one post/day, respects "
+                    "the daily cap). Use for 'run today's automation' / 'do your daily run'.\n"
+                    "- 'batch': create and publish several posts across `days` days.\n"
+                    "- 'research': gather trends/ideas only — produces NO post.\n"
+                    "- 'brief': email a morning brief / content plan only — produces NO "
+                    "post and publishes nothing. Only use if the Master explicitly wants "
+                    "a plan/brief, not a post.\n"
+                    "- 'status': just report what ATHENA is currently doing.\n"
+                    "When the Master wants a post made or published, use 'once'."
                 ),
             },
             "days": {
                 "type": "integer",
                 "description": (
-                    "Optional time window in days when the action needs one (e.g. a batch "
-                    "or research spanning a period). Omit if not relevant."
+                    "Only for 'batch': how many days of posts to produce. Omit otherwise."
                 ),
             },
         },

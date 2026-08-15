@@ -51,7 +51,11 @@ class Settings(BaseSettings):
     # localhost job API and writes a `design_result` back. No direct network path
     # to ATHENA is needed (or exposed) from the cloud.
     athena_enabled: bool = True             # offer the athena_design tool to the brain
-    athena_default_action: str = "brief"    # what ATHENA does when ORELIUS doesn't specify
+    # ATHENA is an Instagram content agent; every action revolves around a post.
+    # Default to "once" (create + publish one post now) so a plain "make/publish a
+    # post" request actually produces one. NOTE: "brief" only emails a plan and
+    # publishes nothing — never use it as the default for publish requests.
+    athena_default_action: str = "once"
 
     # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
     telegram_bot_token: str = ""
