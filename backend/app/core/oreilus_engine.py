@@ -6,6 +6,7 @@ Rebuilt to run on Claude Haiku 4.5 with a credit-saving layer (response cache,
 history trimming, prompt caching, dynamic output caps) and a shared-memory link
 to its companion system LUCIUS.
 """
+import re
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from .claude_client import claude_client
@@ -19,6 +20,21 @@ from ..models.conversation import MessageRole, MessageSource
 from ..models.audit_log import AuditEventType, AuditSeverity
 from ..config import settings
 from ..utils.logger import logger
+
+
+# When any of these appear, the Master clearly wants design/content work done by
+# ATHENA — so we FORCE the athena_design tool instead of letting the brain reply
+# in prose (a small model tends to "role-play" delegating without actually doing it).
+_ATHENA_INTENT = re.compile(
+    r"\b(athena|instagram|\big\b|reel|reels|carousel|caption|post|posts|publish|"
+    r"content|design|graphic|graphics|branding|mockup|flyer|banner|story|stories)\b",
+    re.IGNORECASE,
+)
+
+
+def wants_athena(message: str) -> bool:
+    """True if the message is a design/content request ORELIUS should hand to ATHENA."""
+    return bool(_ATHENA_INTENT.search(message or ""))
 
 
 class OreilusEngine:
@@ -117,26 +133,33 @@ class OreilusEngine:
     ) -> str:
         """Generate complete response (non-streaming) with response-cache short-circuit."""
         system = self.system_prompt + shared_context
+        athena_request = settings.athena_enabled and wants_athena(user_message)
 
         # 1) Credit saver: identical repeat question? serve from cache for 0 credits.
+        #    Never cache-serve a design/ATHENA request — it must reach the tool, not
+        #    replay an old canned "forwarded to ATHENA" reply.
         cache_key = self.optimizer.cache_key(system, history)
-        cached = self.optimizer.get_cached_response(cache_key)
-        if cached is not None:
-            logger.info("Served response from cache (0 credits used)")
-            self.optimizer.usage.record_cache_hit(
-                would_be_input=self.claude.count_messages_tokens(history),
-                would_be_output=self.claude.count_tokens(cached),
-            )
-            await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, cached)
-            return cached
+        if not athena_request:
+            cached = self.optimizer.get_cached_response(cache_key)
+            if cached is not None:
+                logger.info("Served response from cache (0 credits used)")
+                self.optimizer.usage.record_cache_hit(
+                    would_be_input=self.claude.count_messages_tokens(history),
+                    would_be_output=self.claude.count_tokens(cached),
+                )
+                await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, cached)
+                return cached
 
         max_tokens = self.optimizer.choose_max_tokens(user_message)
 
         # 2) Live call. When ATHENA is enabled, offer the design-delegation tool so
-        #    ORELIUS can hand design work to ATHENA in a single model turn.
+        #    ORELIUS can hand design work to ATHENA in a single model turn. If the
+        #    message is clearly a design request, FORCE the tool so ORELIUS actually
+        #    dispatches to ATHENA instead of just talking about it.
         if settings.athena_enabled:
             handled = await self._respond_with_athena(
-                db, conversation_id, system, history, user_message, max_tokens, cache_key
+                db, conversation_id, system, history, user_message, max_tokens, cache_key,
+                force_tool=athena_request,
             )
             if handled is not None:
                 return handled
@@ -163,19 +186,24 @@ class OreilusEngine:
         user_message: str,
         max_tokens: int,
         cache_key: str,
+        force_tool: bool = False,
     ) -> Optional[str]:
         """Model turn that may delegate design work to ATHENA.
 
         Returns the reply text if this path produced one (whether or not a design
         job was dispatched), or None to signal the caller to fall back to the
-        plain, tool-less reply path (e.g. on an API error).
+        plain, tool-less reply path (e.g. on an API error). When `force_tool` is
+        set, the model is required to call athena_design (used when the message is
+        clearly a design request), guaranteeing an actual dispatch.
         """
+        tool_choice = {"type": "tool", "name": "athena_design"} if force_tool else None
         try:
             resp = await self.claude.complete_with_tools(
                 messages=history,
                 system_prompt=system,
                 tools=[athena.ATHENA_TOOL],
                 max_tokens=max_tokens,
+                tool_choice=tool_choice,
             )
         except Exception as e:  # noqa: BLE001 - fall back to a normal reply
             logger.warning(f"ATHENA tool turn failed, using plain reply: {e}")

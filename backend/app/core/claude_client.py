@@ -72,13 +72,15 @@ class ClaudeClient:
         system_prompt: str,
         tools: List[Dict],
         max_tokens: Optional[int] = None,
+        tool_choice: Optional[Dict] = None,
     ):
         """Non-streaming call that offers the model `tools`.
 
         Returns the raw Anthropic response so the caller can inspect `stop_reason`
         and any `tool_use` blocks. Usage is still recorded for credit tracking.
+        `tool_choice` can force a specific tool, e.g. {"type": "tool", "name": ...}.
         """
-        response = await self.client.messages.create(
+        kwargs = dict(
             model=self.model,
             max_tokens=max_tokens or self.max_tokens,
             temperature=self.temperature,
@@ -86,6 +88,9 @@ class ClaudeClient:
             messages=messages,
             tools=tools,
         )
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
+        response = await self.client.messages.create(**kwargs)
         self._record_usage(response.usage)
         return response
 
