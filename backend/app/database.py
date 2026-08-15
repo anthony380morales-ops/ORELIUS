@@ -23,12 +23,19 @@ def _build_async_db_url(raw: str):
         raw = "postgresql://" + raw[len("postgres://"):]
     parts = urlsplit(raw)
     query = dict(parse_qsl(parts.query))
+    # libpq / psql params that asyncpg does not understand — strip them and
+    # translate SSL intent into connect_args. Neon's copyable URI ships with
+    # both sslmode=require and channel_binding=require.
     sslmode = query.pop("sslmode", None)
+    channel_binding = query.pop("channel_binding", None)
+    for libpq_only in ("sslrootcert", "sslcert", "sslkey", "options", "target_session_attrs"):
+        query.pop(libpq_only, None)
     async_url = urlunsplit(
         ("postgresql+asyncpg", parts.netloc, parts.path, urlencode(query), parts.fragment)
     )
     connect_args = {}
-    if sslmode and sslmode != "disable":
+    wants_ssl = (sslmode and sslmode != "disable") or bool(channel_binding)
+    if wants_ssl:
         connect_args["ssl"] = True
     return async_url, connect_args
 
