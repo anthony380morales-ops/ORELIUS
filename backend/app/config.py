@@ -88,11 +88,26 @@ class Settings(BaseSettings):
         case_sensitive = False
 
     @property
-    def allowed_telegram_users(self) -> list[int]:
-        """Parse comma-separated telegram user IDs"""
+    def allowed_login_ids(self) -> list[str]:
+        """All authorized login IDs (web + Telegram), as raw strings.
+
+        Web login IDs can be words like 'anthony'; Telegram IDs are numbers.
+        Both live in TELEGRAM_ALLOWED_USERS and are matched as strings.
+        """
         if not self.telegram_allowed_users:
             return []
-        return [int(uid.strip()) for uid in self.telegram_allowed_users.split(",") if uid.strip()]
+        return [uid.strip() for uid in self.telegram_allowed_users.split(",") if uid.strip()]
+
+    @property
+    def allowed_telegram_users(self) -> list[int]:
+        """Numeric Telegram user IDs only (non-numeric login IDs are skipped)."""
+        ids: list[int] = []
+        for uid in self.allowed_login_ids:
+            try:
+                ids.append(int(uid))
+            except ValueError:
+                continue
+        return ids
 
     @property
     def is_production(self) -> bool:

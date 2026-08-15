@@ -54,7 +54,8 @@ class OreilusEngine:
         """Process incoming message from user."""
         try:
             # SECURITY: validate user authorization for all message sources
-            allowed_users = [str(uid) for uid in settings.allowed_telegram_users]
+            # (string IDs so web logins like "anthony" work alongside numeric Telegram IDs)
+            allowed_users = settings.allowed_login_ids
 
             is_safe, threat, audit_event, severity = await self.security.check_message_security(
                 user_message,
