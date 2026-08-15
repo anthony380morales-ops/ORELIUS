@@ -4,12 +4,17 @@ Main entry point for the API server
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from .config import settings
 from .database import init_db
 from .utils.logger import logger
 from .api.routes import chat, system, auth
+import mimetypes
 import os
+
+# Correct MIME type for the PWA manifest when FastAPI serves the built frontend
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # Create logs directory
 os.makedirs("logs", exist_ok=True)
@@ -88,21 +93,29 @@ async def websocket_route(websocket: WebSocket, user_id: str):
     await websocket_endpoint(websocket, user_id)
 
 
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "system": "O.R.E.I.L.U.S.",
-        "version": "0.1.0",
-        "status": "operational",
-        "description": "Optimized Revenue Engine & Intelligent Logistics Unified System",
-    }
-
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+# Serve the built frontend (the phone app) from the same service when present.
+# This lets ORELIUS deploy as ONE container on any free host. API routes and
+# /health above are registered first, so they always win over the static mount.
+STATIC_DIR = os.getenv(
+    "STATIC_DIR", os.path.join(os.path.dirname(__file__), "..", "static")
+)
+if os.path.isdir(STATIC_DIR):
+    logger.info(f"Serving frontend from {STATIC_DIR}")
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "system": "O.R.E.L.I.U.S.",
+            "version": "0.1.0",
+            "status": "operational",
+        }
 
 
 if __name__ == "__main__":

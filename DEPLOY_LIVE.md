@@ -1,138 +1,125 @@
-# Deploy ORELIUS Live (and onto your phone home screen)
+# Deploy ORELIUS Live — Free, HTTPS, on your phone
 
-This is the simplest path to a live, HTTPS ORELIUS you can install as an app on
-your phone. It uses **DigitalOcean App Platform** — it builds straight from this
-GitHub repo, gives you a secure `https://…ondigitalocean.app` address, and runs a
-managed PostgreSQL database for you. No servers to manage.
+ORELIUS runs as **one container**: the FastAPI backend also serves the phone app,
+so you deploy a single service. The recommended path is **100% free**, gives a
+secure `https://…onrender.com` address, and installs to your home screen.
 
-> ORELIUS installs as a **PWA** (Progressive Web App): you open the site once in
-> your phone browser and "Add to Home Screen." It then behaves like a normal app
-> icon — full screen, no browser bars.
+- **App host:** Render.com — free web service, automatic HTTPS.
+- **Database:** Neon.tech — free, permanent PostgreSQL.
+- **Login:** built in (master password) — the URL is protected.
 
----
-
-## What you'll need (5 minutes to gather)
-
-1. A **DigitalOcean account** — https://cloud.digitalocean.com
-2. Your **Anthropic API key** — https://console.anthropic.com (Settings → API Keys).
-   *(Rotate the old one that was in your docs — see the note at the bottom.)*
-3. Two random secrets and a password (generated in Step 2).
-
-Estimated cost: ~**$5/mo** backend + ~**$7/mo** dev database (App Platform basic tiers). The frontend static site is free.
+> Trade-off of "free": Render's free service **sleeps after ~15 min idle**, so the
+> first message after a quiet spell takes ~30–60s to wake. Every message after is
+> instant. If you want always-on free, use **Koyeb** instead (same steps — see the
+> bottom). If you want zero cold starts, Render's paid instance is ~$7/mo.
 
 ---
 
-## Step 1 — Put the code on your `main` branch
+## Before you start (gather 3 things)
 
-The deploy reads the `main` branch. Merge the rebuild branch into `main`
-(GitHub → **Pull requests** → open a PR from `claude/orelius-github-migration-qr1ve2`
-into `main` → **Merge**), or ask me to open that PR for you.
+1. **Anthropic API key** — https://console.anthropic.com → API Keys.
+   🔐 Regenerate the old key that was in your docs and use the new one only.
+2. A **master password** you'll type to log in (make one up, keep it safe).
+3. A **login ID** you'll type (e.g. `anthony`).
 
----
-
-## Step 2 — Generate your secrets
-
-Run these (Mac/Linux terminal, or any online "openssl" — or just make up long random strings):
-
-```bash
-openssl rand -base64 32   # use this for JWT_SECRET_KEY
-openssl rand -hex 32      # use this for ENCRYPTION_KEY
-```
-
-Also decide:
-- **MASTER_PASSWORD** — the password you'll type to log into ORELIUS.
-- **TELEGRAM_ALLOWED_USERS** — the login *user ID* you'll type (e.g. `anthony`).
-  You log in with this ID **plus** the master password.
-
-Keep these four values handy for Step 4.
+You'll also create free Render and Neon accounts below (GitHub login works for both).
 
 ---
 
-## Step 3 — Create the app on DigitalOcean
+## STEP 1 — Get the code onto `main`
 
-**Easiest (dashboard):**
-1. DigitalOcean → **Apps** → **Create App** → **GitHub** → pick `anthony380morales-ops/ORELIUS`, branch `main`.
-2. DigitalOcean auto-detects this repo's `/.do/app.yaml` spec — accept it. It sets up:
-   - a **backend** service (Docker) on `/api` and `/ws`,
-   - a **frontend** static site (the app) on `/`,
-   - a **managed Postgres** database wired to the backend automatically.
-3. Continue to the review screen.
-
-**Or with the CLI** (if you use `doctl`):
-```bash
-doctl apps create --spec .do/app.yaml
-```
+Render deploys the `main` branch. Merge the rebuild branch into `main`:
+- GitHub → your repo → **Pull requests** → **New** → base `main`, compare
+  `claude/orelius-github-migration-qr1ve2` → **Create** → **Merge**.
+- Or just tell me "open the PR" and I'll open it for you.
 
 ---
 
-## Step 4 — Fill in your secrets
+## STEP 2 — Create the free database (Neon)
 
-On the app's **Settings → Environment Variables** (backend component), replace the
-placeholder values:
-
-| Variable | Set it to |
-|---|---|
-| `ANTHROPIC_API_KEY` | your Anthropic key |
-| `JWT_SECRET_KEY` | the `openssl rand -base64 32` value |
-| `ENCRYPTION_KEY` | the `openssl rand -hex 32` value |
-| `MASTER_PASSWORD` | your chosen password |
-| `TELEGRAM_ALLOWED_USERS` | your chosen login ID (e.g. `anthony`) |
-
-`DATABASE_URL`, `FRONTEND_URL`, and `BACKEND_URL` are filled in automatically — leave them.
-
-Click **Save**. The app redeploys.
+1. Go to **https://neon.tech** → **Sign up** (use GitHub).
+2. Click **Create project** (any name, e.g. `orelius`). Pick the region nearest you.
+3. On the project dashboard, find **Connection string** → copy the one labeled
+   **`psql` / URI**. It looks like:
+   `postgresql://user:pass@ep-xxxx.us-east-2.aws.neon.tech/neondb?sslmode=require`
+4. **Save that whole string** — it's your `DATABASE_URL`. (ORELIUS already knows how
+   to talk to Neon's SSL database.)
 
 ---
 
-## Step 5 — First deploy
+## STEP 3 — Deploy the app (Render)
 
-Wait for the build to go green (~3–6 min). DigitalOcean shows your live URL at the
-top, e.g. `https://orelius-xxxxx.ondigitalocean.app`. Open it — you'll see the
-**ORELIUS login**. Sign in with your user ID + master password. You're live.
+1. Go to **https://render.com** → **Sign up** (use GitHub).
+2. Click **New +** → **Blueprint**.
+3. Choose your **ORELIUS** repo. Render finds the `render.yaml` in it and shows a
+   service named **orelius**. Click **Apply**.
+4. Render asks for the values marked "sync: false". Enter:
+   | Field | Value |
+   |---|---|
+   | `DATABASE_URL` | the Neon string from Step 2 |
+   | `ANTHROPIC_API_KEY` | your Anthropic key |
+   | `MASTER_PASSWORD` | your chosen password |
+   | `TELEGRAM_ALLOWED_USERS` | your login ID, e.g. `anthony` |
 
----
+   (`JWT_SECRET_KEY` and `ENCRYPTION_KEY` are generated for you — leave them.)
+5. Click **Apply / Create**. Render builds the container (~4–8 min the first time).
 
-## Step 6 — Install on your phone home screen
-
-**iPhone (Safari):**
-1. Open your ORELIUS URL in **Safari**.
-2. Tap the **Share** button → **Add to Home Screen** → **Add**.
-3. Launch it from the new ORELIUS icon — it opens full screen, like an app.
-
-**Android (Chrome):**
-1. Open the URL in **Chrome**.
-2. Tap **⋮** → **Install app** (or **Add to Home screen**) → **Install**.
-
-Log in once and it stays logged in (tokens refresh automatically for 30 days).
-
----
-
-## Optional — a custom domain
-
-App → **Settings → Domains** → add e.g. `orelius.yourdomain.com` and point the DNS
-CNAME as DigitalOcean instructs. HTTPS is issued automatically. Then reinstall from
-the new address.
+When it's done, Render shows a green **Live** badge and your URL at the top:
+`https://orelius.onrender.com` (your exact name may differ).
 
 ---
 
-## Notes & troubleshooting
+## STEP 4 — First login
 
-- **Redis is not required** — the rate limiter runs in-memory, so the minimal setup
-  (Postgres only) is all you need. You can add managed Redis later and set `REDIS_URL`.
-- **Telegram is optional** — leave `TELEGRAM_BOT_TOKEN` unset and the bot simply
-  doesn't start. Set `TELEGRAM_ALLOWED_USERS` regardless; it's your login allow-list.
-- **Build fails on the backend?** Check the build logs — usually a missing secret.
-  All five secrets in Step 4 must be set.
-- **Can't log in (403)?** The user ID you typed isn't in `TELEGRAM_ALLOWED_USERS`.
-- **Can't log in (401)?** Wrong master password.
-- 🔐 **Rotate your Anthropic key.** The one previously written into your deployment
-  docs should be regenerated in the Anthropic Console and only the new one used here.
+Open your Render URL in a browser. You'll see the **ORELIUS login**.
+Sign in with your **login ID** + **master password**. You're live. 🎉
+
+If it says:
+- **403** → the ID you typed isn't in `TELEGRAM_ALLOWED_USERS` (fix it in Render → Environment).
+- **401** → wrong master password.
 
 ---
 
-## Even simpler alternative (Render.com)
+## STEP 5 — Put ORELIUS on your phone home screen
 
-If you'd rather not use DigitalOcean, **Render** is similar: New → **Blueprint**,
-point it at this repo, and it can auto-provision a free Postgres. I can add a
-`render.yaml` on request. DigitalOcean App Platform is the path documented above
-because you already use DigitalOcean.
+**iPhone (Safari):** open the URL → tap **Share** → **Add to Home Screen** → **Add**.
+**Android (Chrome):** open the URL → tap **⋮** → **Install app** → **Install**.
+
+Launch it from the ORELIUS icon — it opens full screen like a real app, and stays
+logged in (tokens auto-refresh for 30 days).
+
+---
+
+## Updating later
+
+Every push to `main` auto-redeploys (Render `autoDeploy: true`). Athena's design
+changes will go live on the next push with no extra steps.
+
+---
+
+## Optional: custom domain
+
+Render → your service → **Settings → Custom Domains** → add
+`orelius.yourdomain.com` and set the DNS CNAME Render shows. HTTPS is automatic.
+
+---
+
+## Always-on free alternative — Koyeb
+
+If the free cold-start bothers you, **Koyeb** runs the same container free without
+sleeping:
+1. Neon database exactly as in Step 2.
+2. **https://koyeb.com** → **Create Service** → **GitHub** → your repo →
+   **Dockerfile** builder (it uses the root `Dockerfile`).
+3. Add the same environment variables from Step 3 (for `JWT_SECRET_KEY` and
+   `ENCRYPTION_KEY`, generate two long random strings yourself).
+4. Deploy → you get a free `https://…koyeb.app` URL. Install to home screen as above.
+
+---
+
+## Notes
+
+- **Redis not required** — rate limiting is in-memory.
+- **Telegram optional** — leave `TELEGRAM_BOT_TOKEN` unset; the bot just won't start.
+- **DigitalOcean** is still supported if you ever want it — the repo also ships
+  `.do/app.yaml`. But the free Render + Neon path above needs no paid host.
