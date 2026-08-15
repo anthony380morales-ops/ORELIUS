@@ -13,6 +13,7 @@ from .session_authentication import SessionAuthentication, SessionSource, AuthSt
 from .message_metrics import MessageMetrics
 from .security_challenges import SecurityChallenge
 from .dynamic_keywords import DynamicKeyword
+from .shared_memory import SharedMemoryEvent
 
 __all__ = [
     "Conversation",
@@ -33,4 +34,5 @@ __all__ = [
     "MessageMetrics",
     "SecurityChallenge",
     "DynamicKeyword",
+    "SharedMemoryEvent",
 ]

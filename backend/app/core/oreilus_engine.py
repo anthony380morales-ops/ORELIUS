@@ -35,14 +35,6 @@ class OreilusEngine:
         self.optimizer = token_optimizer
         self.shared = shared_memory
 
-    def _compose_system(self) -> str:
-        """Persona + a small block of shared LUCIUS/ORELIUS memory.
-
-        The shared context is kept short so it barely adds tokens; the persona
-        prefix stays stable so prompt caching keeps hitting.
-        """
-        return self.system_prompt + self.shared.build_context()
-
     async def process_message(
         self,
         db: AsyncSession,
@@ -91,11 +83,14 @@ class OreilusEngine:
             history = await self.memory.get_conversation_history(db, conversation.id)
             history = self.optimizer.trim_history(history)
 
+            # Pull the latest shared LUCIUS/ORELIUS memory to inject into the persona
+            shared_context = await self.shared.build_context(db)
+
             logger.info(f"Generating response for user {user_id} (conversation {conversation.id})")
 
             if stream:
-                return self._stream_response(db, conversation.id, history, user_message)
-            return await self._complete_response(db, conversation.id, history, user_message)
+                return self._stream_response(db, conversation.id, history, user_message, shared_context)
+            return await self._complete_response(db, conversation.id, history, user_message, shared_context)
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
@@ -117,9 +112,10 @@ class OreilusEngine:
         conversation_id: int,
         history: list[dict],
         user_message: str,
+        shared_context: str = "",
     ) -> str:
         """Generate complete response (non-streaming) with response-cache short-circuit."""
-        system = self._compose_system()
+        system = self.system_prompt + shared_context
 
         # 1) Credit saver: identical repeat question? serve from cache for 0 credits.
         cache_key = self.optimizer.cache_key(system, history)
@@ -143,7 +139,7 @@ class OreilusEngine:
 
         self.optimizer.store_response(cache_key, response)
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, response)
-        self._record_shared_memory(user_message, response)
+        await self._record_shared_memory(db, user_message, response)
         return response
 
     async def _stream_response(
@@ -152,9 +148,10 @@ class OreilusEngine:
         conversation_id: int,
         history: list[dict],
         user_message: str,
+        shared_context: str = "",
     ) -> AsyncGenerator[str, None]:
         """Generate streaming response."""
-        system = self._compose_system()
+        system = self.system_prompt + shared_context
         full_response = ""
 
         async for chunk in await self.claude.chat(
@@ -169,12 +166,13 @@ class OreilusEngine:
         # persist + cache + share once streaming completes
         self.optimizer.store_response(self.optimizer.cache_key(system, history), full_response)
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, full_response)
-        self._record_shared_memory(user_message, full_response)
+        await self._record_shared_memory(db, user_message, full_response)
 
-    def _record_shared_memory(self, user_message: str, response: str) -> None:
+    async def _record_shared_memory(self, db: AsyncSession, user_message: str, response: str) -> None:
         """Write a compact exchange summary to the LUCIUS/ORELIUS shared log."""
         try:
-            self.shared.remember(
+            await self.shared.remember(
+                db,
                 content=f"Master asked: {user_message[:280]} | ORELIUS advised: {response[:280]}",
                 kind="exchange",
                 actor="ORELIUS",

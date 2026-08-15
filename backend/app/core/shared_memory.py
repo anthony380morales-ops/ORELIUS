@@ -1,115 +1,97 @@
 """
-O.R.E.L.I.U.S. <-> LUCIUS Shared Memory
-------------------------------------------------
-ORELIUS and LUCIUS are companions with a shared brain: anything LUCIUS does,
-ORELIUS knows, and vice-versa.
+O.R.E.L.I.U.S. <-> LUCIUS Shared Memory (durable hub)
+------------------------------------------------------
+ORELIUS is the shared-memory hub. Every event either system records is a row in
+the Postgres `shared_memory` table:
+  * ORELIUS writes its exchanges/actions directly (it owns the database).
+  * LUCIUS reads and writes via the secured /api/memory endpoint.
 
-Simplest reliable method (chosen per the Master's instruction):
-  * A single shared JSON event log both systems read from and append to.
-  * LUCIUS points at the same file (or the same path on a shared volume) and
-    writes events with actor="LUCIUS"; ORELIUS writes actor="ORELIUS".
-  * Optional best-effort HTTP mirror to a LUCIUS endpoint if one is configured,
-    so the two stay in sync even across machines — but the file is the source of
-    truth and everything works with zero extra infrastructure.
-
-Each memory event is a small record:
-  { "ts": <epoch>, "actor": "ORELIUS"|"LUCIUS", "kind": "...", "content": "...", "meta": {...} }
+ORELIUS injects the most recent shared events into its persona each turn, so
+"anything LUCIUS does, ORELIUS knows, and vice-versa." An optional best-effort
+push to a LUCIUS webhook is supported when LUCIUS_API_URL is configured.
 """
 from __future__ import annotations
 
-import json
-import os
-import threading
 import time
 from typing import Dict, List, Optional
 
 import httpx
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from ..models.shared_memory import SharedMemoryEvent
 from ..utils.logger import logger
 
 
 class SharedMemory:
-    """File-backed shared event log with an optional LUCIUS HTTP mirror."""
+    """Durable, database-backed shared memory between ORELIUS and LUCIUS."""
 
     def __init__(self):
-        self.path = settings.shared_memory_path
         self.max_items = settings.shared_memory_max_items
-        self._lock = threading.Lock()
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        if not os.path.exists(self.path):
-            self._write_all([])
 
-    # --- low-level file io ----------------------------------------------
-    def _read_all(self) -> List[Dict]:
-        try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, list) else data.get("events", [])
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-
-    def _write_all(self, events: List[Dict]) -> None:
-        try:
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(events[-self.max_items :], f, indent=2)
-        except OSError as e:
-            logger.warning(f"SharedMemory write failed: {e}")
-
-    # --- public api ------------------------------------------------------
-    def remember(
+    async def remember(
         self,
+        db: AsyncSession,
         content: str,
         kind: str = "note",
         actor: str = "ORELIUS",
         meta: Optional[Dict] = None,
     ) -> Dict:
-        """Append an event to the shared log (and mirror to LUCIUS if configured)."""
-        event = {
-            "ts": time.time(),
-            "actor": actor,
-            "kind": kind,
-            "content": content.strip()[:2000],
-            "meta": meta or {},
-        }
-        with self._lock:
-            events = self._read_all()
-            events.append(event)
-            self._write_all(events)
-        # best-effort remote mirror; never blocks the conversation on failure
-        self._mirror_to_lucius(event)
-        return event
+        """Append an event to the shared log (and optionally push to LUCIUS)."""
+        event = SharedMemoryEvent(
+            ts=time.time(),
+            actor=(actor or "ORELIUS")[:64],
+            kind=(kind or "note")[:64],
+            content=content.strip()[:4000],
+            meta=meta or {},
+        )
+        db.add(event)
+        await db.flush()  # assign id
 
-    def recall(self, limit: int = 6, actor: Optional[str] = None) -> List[Dict]:
+        # keep only the newest max_items rows
+        keep_ids = select(SharedMemoryEvent.id).order_by(
+            SharedMemoryEvent.ts.desc()
+        ).limit(self.max_items)
+        await db.execute(delete(SharedMemoryEvent).where(SharedMemoryEvent.id.notin_(keep_ids)))
+
+        result = event.as_dict()
+        await self._mirror_to_lucius(result)
+        return result
+
+    async def recall(
+        self,
+        db: AsyncSession,
+        limit: int = 6,
+        actor: Optional[str] = None,
+    ) -> List[Dict]:
         """Return the most recent shared events, newest last."""
-        with self._lock:
-            events = self._read_all()
+        q = select(SharedMemoryEvent)
         if actor:
-            events = [e for e in events if e.get("actor") == actor]
-        return events[-limit:]
+            q = q.where(SharedMemoryEvent.actor == actor)
+        q = q.order_by(SharedMemoryEvent.ts.desc()).limit(max(1, min(limit, 100)))
+        rows = (await db.execute(q)).scalars().all()
+        return [r.as_dict() for r in reversed(rows)]
 
-    def build_context(self, limit: Optional[int] = None) -> str:
-        """Compact text block of recent shared memory to inject into the persona.
-
-        Kept intentionally short (a handful of items) so it costs almost no tokens.
-        """
+    async def build_context(self, db: AsyncSession, limit: Optional[int] = None) -> str:
+        """Compact text block of recent shared memory to inject into the persona."""
         limit = limit or settings.shared_memory_context_items
-        events = self.recall(limit=limit)
+        try:
+            events = await self.recall(db, limit=limit)
+        except Exception as e:  # noqa: BLE001 - never block a reply on memory
+            logger.debug(f"shared memory recall skipped: {e}")
+            return ""
         if not events:
             return ""
-        lines = []
-        for e in events:
-            actor = e.get("actor", "?")
-            kind = e.get("kind", "note")
-            content = e.get("content", "")
-            lines.append(f"- [{actor}/{kind}] {content}")
+        lines = [f"- [{e['actor']}/{e['kind']}] {e['content']}" for e in events]
         return (
             "\n\n# SHARED MEMORY (LUCIUS <-> ORELIUS)\n"
-            "Recent activity from you and your companion LUCIUS. Treat it as shared knowledge:\n"
-            + "\n".join(lines)
+            "Recent activity from you and your companion LUCIUS. Treat it as shared "
+            "knowledge:\n" + "\n".join(lines)
         )
 
-    def _mirror_to_lucius(self, event: Dict) -> None:
+    async def _mirror_to_lucius(self, event: Dict) -> None:
+        """Optional best-effort push to a LUCIUS webhook (no-op unless configured)."""
         if not settings.lucius_api_url:
             return
         try:
@@ -118,50 +100,14 @@ class SharedMemory:
                 headers["Authorization"] = f"Bearer {settings.lucius_api_key}"
             if settings.lucius_shared_secret:
                 headers["X-Shared-Secret"] = settings.lucius_shared_secret
-            # short timeout, fire-and-forget; failures are logged, never raised
-            with httpx.Client(timeout=3.0) as client:
-                client.post(
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(
                     settings.lucius_api_url.rstrip("/") + "/memory",
                     json=event,
                     headers=headers,
                 )
         except Exception as e:  # noqa: BLE001 - mirror must never break chat
             logger.debug(f"LUCIUS mirror skipped ({e})")
-
-    def pull_from_lucius(self, limit: int = 20) -> int:
-        """Optionally pull recent LUCIUS events into the shared log (two-way sync).
-
-        Returns the number of new events ingested. No-op if LUCIUS isn't configured.
-        """
-        if not settings.lucius_api_url:
-            return 0
-        try:
-            headers = {}
-            if settings.lucius_api_key:
-                headers["Authorization"] = f"Bearer {settings.lucius_api_key}"
-            with httpx.Client(timeout=3.0) as client:
-                resp = client.get(
-                    settings.lucius_api_url.rstrip("/") + "/memory",
-                    params={"limit": limit},
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                remote = resp.json()
-            remote_events = remote if isinstance(remote, list) else remote.get("events", [])
-            with self._lock:
-                events = self._read_all()
-                known = {(e.get("ts"), e.get("content")) for e in events}
-                new = [
-                    e for e in remote_events if (e.get("ts"), e.get("content")) not in known
-                ]
-                if new:
-                    events.extend(new)
-                    events.sort(key=lambda e: e.get("ts", 0))
-                    self._write_all(events)
-            return len(new)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"LUCIUS pull skipped ({e})")
-            return 0
 
 
 # Global shared-memory instance
