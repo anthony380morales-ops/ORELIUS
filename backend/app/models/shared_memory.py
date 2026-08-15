@@ -6,7 +6,7 @@ rows into its persona each turn; LUCIUS reads/writes them via the /api/memory
 endpoint. Persisted in Postgres so it survives restarts and is reachable by both.
 """
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float, JSON
-from datetime import datetime, timezone
+from datetime import datetime
 from ..database import Base
 
 
@@ -19,7 +19,8 @@ class SharedMemoryEvent(Base):
     kind = Column(String(64), default="note")            # exchange | action | note | ...
     content = Column(Text, nullable=False)
     meta = Column(JSON, default=dict)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # naive UTC to match the timestamp-without-tz column (asyncpg rejects tz-aware here)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     def as_dict(self) -> dict:
         return {
