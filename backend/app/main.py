@@ -33,11 +33,12 @@ async def lifespan(app: FastAPI):
     status = await oreilus_engine.validate_system()
     logger.info(f"System validation: {status}")
 
-    # Start Telegram bot if configured
-    from .telegram import telegram_bot
+    # Start Telegram bot only if configured (import is deferred so a
+    # Telegram-less deploy never loads the bot module)
     if settings.telegram_bot_token:
-        logger.info("Starting Telegram bot...")
         import asyncio
+        from .telegram import telegram_bot
+        logger.info("Starting Telegram bot...")
         asyncio.create_task(telegram_bot.start())
         logger.info("Telegram bot started")
 
@@ -46,8 +47,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down O.R.E.L.I.U.S. system...")
 
-    # Stop Telegram bot
     if settings.telegram_bot_token:
+        from .telegram import telegram_bot
         await telegram_bot.stop()
 
 
