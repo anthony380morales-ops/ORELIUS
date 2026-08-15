@@ -27,6 +27,10 @@ services:
       # The login ID(s) allowed in (comma-separated). Log in with one of these.
       - key: TELEGRAM_ALLOWED_USERS
         value: anthony
+      # Shared secret for the ORELIUS <-> LUCIUS memory hub (/api/memory).
+      # Render generates + stores it; copy the value from the dashboard for LUCIUS.
+      - key: LUCIUS_SHARED_SECRET
+        generateValue: true
       - key: ENVIRONMENT
         value: production
       - key: LOG_LEVEL
