@@ -18,22 +18,40 @@ import asyncio
 import os
 import time
 
+# Load LUCIUS's .env so this works no matter the import order (and in bare tests).
+try:
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+    load_dotenv()
+except Exception:
+    pass
+
 import requests
 
-ORELIUS_URL = os.getenv("ORELIUS_URL", "https://orelius.onrender.com").rstrip("/")
-ORELIUS_SHARED_SECRET = os.getenv("ORELIUS_SHARED_SECRET", "")
+# Read live each call so a late-loaded .env is always respected.
+def _url() -> str:
+    return os.getenv("ORELIUS_URL", "https://orelius.onrender.com").rstrip("/")
 
-_HEADERS = {
-    "X-Shared-Secret": ORELIUS_SHARED_SECRET,
-    "Content-Type": "application/json",
-}
+
+def _secret() -> str:
+    return os.getenv("ORELIUS_SHARED_SECRET", "")
+
+
+def _headers() -> dict:
+    return {"X-Shared-Secret": _secret(), "Content-Type": "application/json"}
+
+
+# Convenience constant (populated after .env load above) for quick health checks.
+ORELIUS_SHARED_SECRET = _secret()
+
 # Generous write timeout so a cold (free-tier) ORELIUS has time to wake.
 _WRITE_TIMEOUT = 20
 _READ_TIMEOUT = 12
 
 
 def _enabled() -> bool:
-    return bool(ORELIUS_SHARED_SECRET)
+    return bool(_secret())
 
 
 # ---------------------------------------------------------------- writes
@@ -45,9 +63,9 @@ def remember_sync(content: str, kind: str = "action", meta: dict | None = None) 
     for attempt in range(2):  # one retry helps survive a cold-start wake
         try:
             r = requests.post(
-                f"{ORELIUS_URL}/api/memory",
+                f"{_url()}/api/memory",
                 json=payload,
-                headers=_HEADERS,
+                headers=_headers(),
                 timeout=_WRITE_TIMEOUT,
             )
             if r.status_code < 400:
@@ -69,9 +87,9 @@ def recall_sync(limit: int = 8) -> list[dict]:
         return []
     try:
         r = requests.get(
-            f"{ORELIUS_URL}/api/memory",
+            f"{_url()}/api/memory",
             params={"limit": limit},
-            headers=_HEADERS,
+            headers=_headers(),
             timeout=_READ_TIMEOUT,
         )
         if r.status_code == 200:
