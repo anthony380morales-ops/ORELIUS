@@ -66,6 +66,29 @@ class ClaudeClient:
             return response.content[0].text
         return ""
 
+    async def complete_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: str,
+        tools: List[Dict],
+        max_tokens: Optional[int] = None,
+    ):
+        """Non-streaming call that offers the model `tools`.
+
+        Returns the raw Anthropic response so the caller can inspect `stop_reason`
+        and any `tool_use` blocks. Usage is still recorded for credit tracking.
+        """
+        response = await self.client.messages.create(
+            model=self.model,
+            max_tokens=max_tokens or self.max_tokens,
+            temperature=self.temperature,
+            system=self._build_system(system_prompt),
+            messages=messages,
+            tools=tools,
+        )
+        self._record_usage(response.usage)
+        return response
+
     async def _stream_chat(
         self,
         messages: List[Dict[str, str]],

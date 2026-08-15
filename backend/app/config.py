@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     lucius_api_key: str = ""
     lucius_shared_secret: str = ""
 
+    # --- ATHENA design agent (companion link) ---
+    # ORELIUS delegates design work to ATHENA by writing a `design_request` event
+    # to shared memory; a local bridge daemon on the user's machine drives ATHENA's
+    # localhost job API and writes a `design_result` back. No direct network path
+    # to ATHENA is needed (or exposed) from the cloud.
+    athena_enabled: bool = True             # offer the athena_design tool to the brain
+    athena_default_action: str = "brief"    # what ATHENA does when ORELIUS doesn't specify
+
     # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
     telegram_bot_token: str = ""
     telegram_allowed_users: str = ""  # Comma-separated user IDs allowed to log in

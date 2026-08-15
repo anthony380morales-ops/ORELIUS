@@ -14,6 +14,7 @@ from .security import security_layer
 from .prompts import get_system_prompt
 from .token_optimizer import token_optimizer
 from .shared_memory import shared_memory
+from . import athena
 from ..models.conversation import MessageRole, MessageSource
 from ..models.audit_log import AuditEventType, AuditSeverity
 from ..config import settings
@@ -129,18 +130,93 @@ class OreilusEngine:
             await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, cached)
             return cached
 
-        # 2) Live call with a dynamic output cap (small for chat, larger for reports)
+        max_tokens = self.optimizer.choose_max_tokens(user_message)
+
+        # 2) Live call. When ATHENA is enabled, offer the design-delegation tool so
+        #    ORELIUS can hand design work to ATHENA in a single model turn.
+        if settings.athena_enabled:
+            handled = await self._respond_with_athena(
+                db, conversation_id, system, history, user_message, max_tokens, cache_key
+            )
+            if handled is not None:
+                return handled
+
+        # Plain reply path (no tools) — also the fallback if the tools call fails.
         response = await self.claude.chat(
             messages=history,
             system_prompt=system,
             stream=False,
-            max_tokens=self.optimizer.choose_max_tokens(user_message),
+            max_tokens=max_tokens,
         )
 
         self.optimizer.store_response(cache_key, response)
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, response)
         await self._record_shared_memory(db, user_message, response)
         return response
+
+    async def _respond_with_athena(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        system: str,
+        history: list[dict],
+        user_message: str,
+        max_tokens: int,
+        cache_key: str,
+    ) -> Optional[str]:
+        """Model turn that may delegate design work to ATHENA.
+
+        Returns the reply text if this path produced one (whether or not a design
+        job was dispatched), or None to signal the caller to fall back to the
+        plain, tool-less reply path (e.g. on an API error).
+        """
+        try:
+            resp = await self.claude.complete_with_tools(
+                messages=history,
+                system_prompt=system,
+                tools=[athena.ATHENA_TOOL],
+                max_tokens=max_tokens,
+            )
+        except Exception as e:  # noqa: BLE001 - fall back to a normal reply
+            logger.warning(f"ATHENA tool turn failed, using plain reply: {e}")
+            return None
+
+        # Collect any spoken text and the first athena_design tool call.
+        preface_parts: list[str] = []
+        tool_call = None
+        for block in getattr(resp, "content", []) or []:
+            btype = getattr(block, "type", None)
+            if btype == "text":
+                preface_parts.append(getattr(block, "text", "") or "")
+            elif btype == "tool_use" and getattr(block, "name", "") == "athena_design":
+                tool_call = block
+
+        if tool_call is None:
+            # No design work — behave like a normal completion (cache + persist).
+            reply = "\n".join(p for p in preface_parts if p).strip()
+            if not reply:
+                return None  # nothing usable; let the plain path handle it
+            self.optimizer.store_response(cache_key, reply)
+            await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+            await self._record_shared_memory(db, user_message, reply)
+            return reply
+
+        # Dispatch the design job to ATHENA via shared memory (bridge picks it up).
+        args = getattr(tool_call, "input", None) or {}
+        brief = str(args.get("brief") or user_message)
+        action = args.get("action")
+        days = args.get("days")
+        await athena.enqueue_design_request(db, brief=brief, action=action, days=days)
+
+        reply = athena.confirmation_text(
+            brief=brief,
+            action=action or settings.athena_default_action,
+            preface="\n".join(p for p in preface_parts if p).strip(),
+        )
+        # Design dispatches are one-off; don't cache the confirmation.
+        await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+        await self._record_shared_memory(db, user_message, reply)
+        return reply
 
     async def _stream_response(
         self,

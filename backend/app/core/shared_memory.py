@@ -85,9 +85,11 @@ class SharedMemory:
             return ""
         lines = [f"- [{e['actor']}/{e['kind']}] {e['content']}" for e in events]
         return (
-            "\n\n# SHARED MEMORY (LUCIUS <-> ORELIUS)\n"
-            "Recent activity from you and your companion LUCIUS. Treat it as shared "
-            "knowledge:\n" + "\n".join(lines)
+            "\n\n# SHARED MEMORY (ORELIUS <-> LUCIUS <-> ATHENA)\n"
+            "Recent activity from you and your companions LUCIUS (voice/ops) and "
+            "ATHENA (design). Treat it as shared knowledge. A 'design_result' from "
+            "ATHENA is her reply to design work you delegated — surface it to the "
+            "Master:\n" + "\n".join(lines)
         )
 
     async def _mirror_to_lucius(self, event: Dict) -> None:
