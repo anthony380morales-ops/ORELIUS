@@ -68,7 +68,7 @@ POLL_SECONDS = int(_env("BRIDGE_POLL_SECONDS", "15") or "15")
 JOB_TIMEOUT = int(_env("BRIDGE_JOB_TIMEOUT", "1800") or "1800")  # 30 min
 STATE_FILE = Path(_env("BRIDGE_STATE_FILE", "") or (Path(__file__).resolve().parent / "athena_bridge_state.json"))
 
-# ATHENA's job API accepts these actions; anything else is coerced to "brief".
+# ATHENA's /jobs API accepts these actions; anything else is coerced to "once".
 ATHENA_ACTIONS = {"once", "batch", "autopilot", "research", "brief"}
 
 _ORELIUS_HEADERS = {"X-Shared-Secret": ORELIUS_SECRET, "Content-Type": "application/json"}
@@ -132,21 +132,45 @@ def write_result(content: str, meta: dict) -> None:
 
 
 # ----------------------------------------------------------------- ATHENA
-def athena_start_job(action: str, days) -> str | None:
-    body: dict = {"action": action}
-    if isinstance(days, int):
-        body["days"] = days
+def _post_athena(path: str, body: dict) -> str | None:
+    """POST to an ATHENA endpoint that returns 202 {jobId}. Returns the jobId."""
     try:
-        r = requests.post(f"{ATHENA_BASE_URL}/jobs", json=body, headers=_ATHENA_HEADERS, timeout=20)
+        r = requests.post(f"{ATHENA_BASE_URL}{path}", json=body, headers=_ATHENA_HEADERS, timeout=30)
         if r.status_code == 202:
             return r.json().get("jobId")
         if r.status_code == 409:
-            log("ATHENA is busy (409) — will retry this request next poll")
+            log(f"ATHENA busy (409) on {path} — will retry this request next poll")
             return None
-        log(f"ATHENA POST /jobs -> {r.status_code}: {r.text[:200]}")
+        log(f"ATHENA POST {path} -> {r.status_code}: {r.text[:300]}")
     except Exception as e:
         log(f"ATHENA unreachable ({e}) — is she running on {ATHENA_BASE_URL}?")
     return None
+
+
+def athena_dispatch(kind: str, brief: str, meta: dict) -> str | None:
+    """Start the right ATHENA job for this request kind. Returns a jobId to poll."""
+    if kind == "instagram_post":
+        action = str(meta.get("action") or "once").lower()
+        if action not in ATHENA_ACTIONS:
+            action = "once"
+        body: dict = {"action": action}
+        days = meta.get("days")
+        if isinstance(days, int):
+            body["days"] = days
+        log(f"-> POST /jobs action={action}")
+        return _post_athena("/jobs", body)
+
+    if kind == "website":
+        log("-> POST /site")
+        return _post_athena("/site", {"prompt": brief})
+
+    # default: design engine
+    body = {"prompt": brief}
+    task = meta.get("task")
+    if isinstance(task, str) and task:
+        body["task"] = task
+    log(f"-> POST /design{f' task={task}' if task else ''}")
+    return _post_athena("/design", body)
 
 
 def athena_wait(job_id: str) -> dict:
@@ -169,32 +193,59 @@ def athena_wait(job_id: str) -> dict:
 
 
 # ----------------------------------------------------------------- loop
+def _extract_assets(result: dict) -> list:
+    """Best-effort pull of output file paths from an ATHENA job result."""
+    if not isinstance(result, dict):
+        return []
+    for key in ("assets", "files", "outputs", "paths", "pngPaths", "images"):
+        val = result.get(key)
+        if isinstance(val, list) and val:
+            return [str(v) for v in val][:10]
+    return []
+
+
 def handle_request(ev: dict) -> None:
     meta = ev.get("meta") or {}
-    action = str(meta.get("action") or "brief").lower()
-    if action not in ATHENA_ACTIONS:
-        action = "brief"
-    days = meta.get("days")
+    kind = str(meta.get("kind") or "design").lower()
     brief = ev.get("content") or ""
     req_id = ev.get("id")
 
-    log(f"design_request #{req_id}: action={action} — dispatching to ATHENA")
-    job_id = athena_start_job(action, days)
+    log(f"design_request #{req_id}: kind={kind} — dispatching to ATHENA")
+    job_id = athena_dispatch(kind, brief, meta)
     if not job_id:
         raise RuntimeError("job not accepted")  # leave unprocessed; retried next poll
 
-    result = athena_wait(job_id)
-    state = str(result.get("state") or result.get("status") or "unknown")
-    summary = result.get("summary") or result.get("result") or result.get("message") or ""
-    if isinstance(summary, (dict, list)):
-        summary = json.dumps(summary)[:600]
+    job = athena_wait(job_id)
+    state = str(job.get("status") or job.get("state") or "unknown")
+    inner = job.get("result") if isinstance(job.get("result"), dict) else job
+    assets = _extract_assets(inner)
 
-    content = (
-        f"ATHENA {action} job {state}. "
-        + (f"Brief: {str(brief)[:200]}. " if brief else "")
-        + (f"Result: {str(summary)[:600]}" if summary else "See ATHENA logs for details.")
+    # Build a human summary of what ATHENA produced.
+    if state in ("failed", "error"):
+        detail = str(job.get("error") or "see ATHENA logs")
+        content = f"ATHENA {kind} job FAILED: {detail[:400]}"
+    else:
+        bits = []
+        if isinstance(inner, dict):
+            if "approved" in inner:
+                bits.append(f"approved={inner.get('approved')} score={inner.get('score')}")
+            if inner.get("note"):
+                bits.append(str(inner["note"]))
+            if inner.get("scheduled"):
+                bits.append("scheduled to Instagram")
+            if inner.get("savedTo"):
+                bits.append(f"saved: {inner['savedTo']}")
+        if assets:
+            bits.append(f"{len(assets)} file(s): " + "; ".join(assets))
+        summary = " | ".join(b for b in bits if b)
+        if not summary:
+            summary = json.dumps(inner)[:500] if isinstance(inner, (dict, list)) else "done"
+        content = f"ATHENA {kind} job {state}. {summary}"
+
+    write_result(
+        content[:3900],
+        {"request_id": req_id, "job_id": job_id, "kind": kind, "state": state, "assets": assets},
     )
-    write_result(content, {"request_id": req_id, "job_id": job_id, "action": action, "state": state})
     log(f"design_request #{req_id}: reported '{state}' back to ORELIUS")
 
 

@@ -229,16 +229,20 @@ class OreilusEngine:
             await self._record_shared_memory(db, user_message, reply)
             return reply
 
-        # Dispatch the design job to ATHENA via shared memory (bridge picks it up).
+        # Dispatch the job to ATHENA via shared memory (bridge picks it up).
         args = getattr(tool_call, "input", None) or {}
-        brief = str(args.get("brief") or user_message)
+        request_text = str(args.get("request") or args.get("brief") or user_message)
+        kind = args.get("kind")
+        task = args.get("task")
         action = args.get("action")
         days = args.get("days")
-        await athena.enqueue_design_request(db, brief=brief, action=action, days=days)
+        await athena.enqueue_design_request(
+            db, request=request_text, kind=kind, task=task, action=action, days=days
+        )
 
         reply = athena.confirmation_text(
-            brief=brief,
-            action=action or settings.athena_default_action,
+            request=request_text,
+            kind=kind or "design",
             preface="\n".join(p for p in preface_parts if p).strip(),
         )
         # Design dispatches are one-off; don't cache the confirmation.

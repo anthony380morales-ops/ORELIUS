@@ -80,19 +80,19 @@ pm2 save
 
 ## What ORELIUS sends
 
-The brain picks an `action` for each request (mirrors ATHENA's `/jobs` actions):
+The brain tags each request with a `kind`, and the bridge routes it to the right
+ATHENA endpoint (all polled at `/jobs/:id`):
 
-| action | ATHENA does |
-|---|---|
-| `brief` (default) | draft a creative brief / plan |
-| `once` | produce one design/post now |
-| `batch` | produce a batch |
-| `research` | gather references/ideas first |
-| `autopilot` | run her full autonomous pipeline |
-| `status` | just report what she's doing |
+| kind | endpoint | ATHENA does |
+|---|---|---|
+| `design` | `POST /design {prompt}` | generate a design asset (logo, poster, social graphic, product/lifestyle art…) → saved to `output/design` |
+| `instagram_post` | `POST /jobs {action}` | research + create + publish/schedule a real Instagram post (`action`: `once` default, `autopilot`, `batch`, `research`, `brief`) |
+| `website` | `POST /site {prompt}` | build a website / landing page |
 
-The bridge posts `{action, days?}` to ATHENA's `POST /jobs`, waits for the job to
-finish (`GET /jobs/:id`), then writes a `design_result` back to ORELIUS.
+The bridge waits for the job to finish, then writes a `design_result` back to
+ORELIUS with the outcome (file paths, quality score, or "scheduled to Instagram").
+Design and website jobs do **not** block on ATHENA's single-flight lock, so they
+can run anytime — even during an autopilot post run.
 
 ## Notes
 
