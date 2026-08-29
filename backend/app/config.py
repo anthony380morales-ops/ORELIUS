@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_allowed_users: str = ""  # Comma-separated user IDs allowed to log in
 
+    # --- Daily Financial Intelligence automation ---
+    # Free FRED API key (https://fred.stlouisfed.org/docs/api/api_key.html).
+    # Treasury Fiscal Data + FDIC need no key; FRED gives rates/CPI/unemployment.
+    fred_api_key: str = ""
+
     # Google Sheets
     google_sheets_credentials_file: str = "./google-credentials.json"
     google_sheet_id_trends: str = ""
