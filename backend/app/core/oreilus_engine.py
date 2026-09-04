@@ -59,6 +59,7 @@ class OreilusEngine:
         user_message: str,
         source: MessageSource = MessageSource.WEB,
         stream: bool = False,
+        attachments: list[dict] | None = None,
     ) -> str | AsyncGenerator[str, None]:
         """Process incoming message from user."""
         try:
@@ -105,9 +106,11 @@ class OreilusEngine:
 
             logger.info(f"Generating response for user {user_id} (conversation {conversation.id})")
 
-            if stream:
+            if stream and not attachments:
                 return self._stream_response(db, conversation.id, history, user_message, shared_context)
-            return await self._complete_response(db, conversation.id, history, user_message, shared_context)
+            return await self._complete_response(
+                db, conversation.id, history, user_message, shared_context, attachments
+            )
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
@@ -130,9 +133,18 @@ class OreilusEngine:
         history: list[dict],
         user_message: str,
         shared_context: str = "",
+        attachments: list[dict] | None = None,
     ) -> str:
         """Generate complete response (non-streaming) with response-cache short-circuit."""
         system = self.system_prompt + shared_context
+
+        # 0) Attachments (photos / files): vision path. No cache, no tools — the
+        #    Master sent media to look at, so answer directly with the image/file.
+        if attachments:
+            return await self._respond_with_attachments(
+                db, conversation_id, system, history, user_message, attachments
+            )
+
         athena_request = settings.athena_enabled and wants_athena(user_message)
 
         # 1) Credit saver: identical repeat question? serve from cache for 0 credits.
@@ -175,6 +187,69 @@ class OreilusEngine:
         self.optimizer.store_response(cache_key, response)
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, response)
         await self._record_shared_memory(db, user_message, response)
+        return response
+
+    async def _respond_with_attachments(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        system: str,
+        history: list[dict],
+        user_message: str,
+        attachments: list[dict],
+    ) -> str:
+        """Answer a message that carries photos/files (Haiku 4.5 vision + files)."""
+        import base64
+
+        text_parts: list[str] = [user_message] if user_message else []
+        media_blocks: list[dict] = []
+        names: list[str] = []
+        for att in attachments:
+            mt = (att.get("media_type") or "").lower()
+            name = att.get("name") or "file"
+            data = att.get("data") or ""
+            names.append(name)
+            if mt.startswith("image/"):
+                media_blocks.append(
+                    {"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}}
+                )
+            elif mt == "application/pdf":
+                media_blocks.append(
+                    {"type": "document", "source": {"type": "base64", "media_type": mt, "data": data}}
+                )
+            elif mt.startswith("text/") or mt in ("application/json", "application/csv"):
+                try:
+                    decoded = base64.b64decode(data).decode("utf-8", errors="replace")[:12000]
+                    text_parts.append(f"\n\n[Attached file: {name}]\n{decoded}")
+                except Exception:  # noqa: BLE001
+                    text_parts.append(f"\n\n[Attached file {name} could not be read]")
+            else:
+                text_parts.append(f"\n\n[Attached: {name} ({mt}) — not directly viewable]")
+
+        content_blocks: list[dict] = [
+            {"type": "text", "text": "\n".join(p for p in text_parts if p) or "Please review the attached file(s), Master."}
+        ] + media_blocks
+
+        messages = list(history)
+        if messages and messages[-1].get("role") == "user":
+            messages[-1] = {"role": "user", "content": content_blocks}
+        else:
+            messages.append({"role": "user", "content": content_blocks})
+
+        try:
+            response = await self.claude.chat(
+                messages=messages,
+                system_prompt=system,
+                stream=False,
+                max_tokens=settings.oreilus_report_max_tokens,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"attachment response failed: {e}")
+            response = "I received your attachment, Master, but could not process it this time. Please try again."
+
+        await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, response)
+        summary = user_message or f"reviewed attachment(s): {', '.join(names)[:200]}"
+        await self._record_shared_memory(db, summary, response)
         return response
 
     async def _respond_with_athena(

@@ -335,6 +335,24 @@ You are now active. Await Master's command.
 FALLBACK_SYSTEM_PROMPT = """You are O.R.E.I.L.U.S., an AI assistant designed to help with business strategy, systems optimization, and strategic planning. You provide intelligent, factual, data-driven advice with a calm, analytical British persona."""
 
 
+# --- Project roadmap, baked into ORELIUS's permanent memory ---
+# (Formerly displayed on the Mission Control Kanban board; the board was retired
+# and its state now lives in ORELIUS's brain so it is always known.)
+PROJECT_ROADMAP = """
+
+# PROJECT ROADMAP (persistent memory — you always know this)
+You carry the master project board in memory. Current state:
+- Phase 1: Core System — COMPLETE (high priority)
+- Phase 2: Mission Control — COMPLETE (high priority)
+- Phase 3: Automation Engine — IN PROGRESS (high priority)
+- Content Trend Scanner — BACKLOG (medium priority)
+- Government Intel Scanner — BACKLOG (medium priority)
+- Google Sheets Integration — BACKLOG (low priority)
+Progress: 2 of 6 workstreams complete. When the Master asks about the project,
+roadmap, board, tasks, or "what's left", answer from this memory.
+"""
+
+
 def get_system_prompt(full: bool = True) -> str:
     """
     Get the system prompt for O.R.E.I.L.U.S.
@@ -345,4 +363,6 @@ def get_system_prompt(full: bool = True) -> str:
     Returns:
         System prompt string
     """
-    return OREILUS_SYSTEM_PROMPT if full else FALLBACK_SYSTEM_PROMPT
+    if full:
+        return OREILUS_SYSTEM_PROMPT + PROJECT_ROADMAP
+    return FALLBACK_SYSTEM_PROMPT

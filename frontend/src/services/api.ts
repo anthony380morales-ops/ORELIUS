@@ -84,10 +84,25 @@ export const authApi = {
   },
 }
 
+export interface ChatAttachment {
+  name: string
+  media_type: string
+  data: string // base64, no data: prefix
+}
+
 export const chatApi = {
   // user_id now comes from the JWT on the server; kept in the signature for callers
-  sendMessage: async (_userId: string, message: string, source: string = 'web') => {
-    const response = await api.post('/chat', { message, source })
+  sendMessage: async (
+    _userId: string,
+    message: string,
+    source: string = 'web',
+    attachments?: ChatAttachment[],
+  ) => {
+    const response = await api.post(
+      '/chat',
+      { message, source, attachments: attachments && attachments.length ? attachments : undefined },
+      { timeout: 90000 }, // vision/file analysis can take longer
+    )
     return response.data
   },
 
@@ -103,6 +118,16 @@ export const chatApi = {
 }
 
 export const systemApi = {
+  getDailyReport: async () => {
+    const response = await api.get('/system/daily-report')
+    return response.data as {
+      report_markdown: string
+      system_health: string
+      automation: any
+      memory: any
+    }
+  },
+
   getStatus: async (): Promise<SystemStatus> => {
     const response = await api.get('/system/status')
     return response.data

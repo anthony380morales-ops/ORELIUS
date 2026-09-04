@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from ...database import get_db
 from ...core import oreilus_engine
 from ...core.auth import get_current_user  # SECURITY FIX: Add JWT authentication
@@ -15,12 +15,21 @@ from ...utils.logger import logger
 router = APIRouter()
 
 
+class Attachment(BaseModel):
+    """A file or photo attached to a chat message (sent as base64 from the browser)."""
+
+    name: str
+    media_type: str          # e.g. image/png, image/jpeg, application/pdf, text/plain
+    data: str                # base64-encoded file contents (no data: prefix)
+
+
 class ChatRequest(BaseModel):
     """Chat request model"""
 
     message: str
     source: Optional[str] = "web"
     stream: Optional[bool] = False
+    attachments: Optional[List[Attachment]] = None
     # user_id removed from request body - will come from JWT token for security
 
 
@@ -61,12 +70,14 @@ async def chat(
         logger.info(f"Chat request from user {current_user} via {source.value}")
 
         # Process message with O.R.E.I.L.U.S. (use authenticated user_id)
+        attachments = [a.model_dump() for a in request.attachments] if request.attachments else None
         response = await oreilus_engine.process_message(
             db=db,
             user_id=current_user,  # SECURITY FIX: Use authenticated user_id from JWT
             user_message=request.message,
             source=source,
             stream=False,
+            attachments=attachments,
         )
 
         return ChatResponse(response=response)

@@ -16,6 +16,98 @@ import datetime
 router = APIRouter()
 
 
+@router.get("/system/daily-report")
+async def daily_report(db: AsyncSession = Depends(get_db)):
+    """Concise 'wake-up' status report ORELIUS greets the Master with each day.
+
+    Covers system health, automation pass/fail (only), and memory — cheaply (no
+    live Claude call), so the chat can show it on open without burning credits.
+    """
+    from ...config import settings
+    from ...models.report import Report, ReportType
+    from ...models.shared_memory import SharedMemoryEvent
+
+    now = datetime.datetime.utcnow()
+
+    # --- System health (light checks, no external calls) ---
+    components: dict = {}
+    db_ok = True
+    try:
+        await db.execute(select(func.count()).select_from(SharedMemoryEvent))
+    except Exception as e:  # noqa: BLE001
+        db_ok = False
+        logger.debug(f"daily-report db check failed: {e}")
+    components["database"] = "online" if db_ok else "error"
+    components["brain"] = "configured" if settings.anthropic_api_key else "missing key"
+    components["shared_memory"] = "online" if settings.lucius_shared_secret else "disabled"
+    healthy = db_ok and bool(settings.anthropic_api_key)
+    system_health = "Operational" if healthy else "Degraded"
+
+    # --- Automation: finance briefing pass/fail (only) ---
+    finance = {"status": "No run yet", "last_run": None}
+    try:
+        last = (
+            await db.execute(
+                select(Report)
+                .where(Report.report_type == ReportType.BANKING_INTELLIGENCE)
+                .order_by(Report.created_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if last:
+            age_h = (now - last.report_date).total_seconds() / 3600 if last.report_date else 999
+            ok = bool(last.content and last.content.get("sources"))
+            fresh = age_h <= 30  # ran within the last day-ish
+            finance = {
+                "status": "PASS" if (ok and fresh) else ("STALE" if ok else "FAIL"),
+                "last_run": last.report_date.isoformat() if last.report_date else None,
+            }
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"daily-report finance check failed: {e}")
+
+    # --- Memory footprint ---
+    memory = {"shared_events": 0, "reports": 0, "conversations": 0}
+    try:
+        memory["shared_events"] = (
+            await db.execute(select(func.count()).select_from(SharedMemoryEvent))
+        ).scalar() or 0
+        memory["reports"] = (
+            await db.execute(select(func.count()).select_from(Report))
+        ).scalar() or 0
+        memory["conversations"] = (
+            await db.execute(select(func.count()).select_from(Conversation))
+        ).scalar() or 0
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"daily-report memory check failed: {e}")
+
+    # --- Assemble the spoken report ---
+    tick = {"PASS": "✅", "FAIL": "❌", "STALE": "⚠️", "No run yet": "—"}.get(finance["status"], "—")
+    lines = [
+        f"**Good day, Master.** Here is your status report — {now:%A, %d %B %Y} (UTC).",
+        "",
+        f"**System Health:** {'🟢' if healthy else '🔴'} {system_health}",
+        f"- Brain: {components['brain']} · Database: {components['database']} · Shared memory: {components['shared_memory']}",
+        "",
+        "**Automations:**",
+        f"- Daily Financial Intelligence: {tick} {finance['status']}"
+        + (f" (last run {finance['last_run'][:10]})" if finance.get("last_run") else ""),
+        "",
+        "**Memory:**",
+        f"- {memory['shared_events']} shared events · {memory['reports']} reports · {memory['conversations']} conversations on record",
+        "",
+        "All systems reporting. How may I serve you today, Master?",
+    ]
+
+    return {
+        "date": now.isoformat(),
+        "system_health": system_health,
+        "components": components,
+        "automation": {"finance_brief": finance},
+        "memory": memory,
+        "report_markdown": "\n".join(lines),
+    }
+
+
 @router.get("/system/optimization")
 async def get_optimization_stats():
     """
