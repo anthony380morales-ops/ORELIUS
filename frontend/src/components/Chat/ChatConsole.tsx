@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { chatApi, systemApi } from '../../services/api'
 import type { ChatAttachment } from '../../services/api'
+import Sparkles from './Sparkles'
 
 /*
  * ORELIUS Chat Console — the entire app.
@@ -139,6 +140,7 @@ export default function ChatConsole() {
 
   return (
     <div className="oreo-root">
+      <Sparkles />
       {/* Header — centered wordmark only */}
       <header className="oreo-header">
         <h1 className="oreo-wordmark">O.R.E.L.I.U.S.</h1>
