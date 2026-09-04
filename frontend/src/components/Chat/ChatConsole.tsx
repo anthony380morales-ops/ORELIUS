@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { chatApi, systemApi, authApi } from '../../services/api'
+import { chatApi, systemApi } from '../../services/api'
 import type { ChatAttachment } from '../../services/api'
 
 /*
@@ -139,18 +139,9 @@ export default function ChatConsole() {
 
   return (
     <div className="oreo-root">
-      {/* Header */}
+      {/* Header — centered wordmark only */}
       <header className="oreo-header">
-        <div className="oreo-brand">
-          <div className="oreo-logo">O</div>
-          <div className="oreo-title">
-            <h1>O.R.E.L.I.U.S.</h1>
-            <span className="oreo-sub">Strategic intelligence</span>
-          </div>
-        </div>
-        <button className="oreo-signout" onClick={() => authApi.logout()} aria-label="Sign out">
-          Sign out
-        </button>
+        <h1 className="oreo-wordmark">O.R.E.L.I.U.S.</h1>
       </header>
 
       {/* Conversation */}
