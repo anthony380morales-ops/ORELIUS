@@ -54,7 +54,15 @@ ATHENA_API_TOKEN=<the same ATHENA_API_TOKEN ATHENA uses>
   host/port.
 
 Optional tuning: `BRIDGE_POLL_SECONDS` (default 15), `BRIDGE_JOB_TIMEOUT` (default
-1800s), `BRIDGE_STATE_FILE`.
+1800s), `BRIDGE_HEARTBEAT_SECONDS` (default 600), `BRIDGE_STATE_FILE`.
+
+### Heartbeat — ATHENA's own activity in shared memory
+Beyond the jobs ORELIUS dispatches, the bridge also polls ATHENA's `/status` on a
+heartbeat (default every 10 min) and mirrors ATHENA's **autonomous** activity into
+ORELIUS shared memory as `athena_activity` events — new posts scheduled to the
+feed, and posts held below the quality gate. So ORELIUS always knows what ATHENA
+did on its own, exactly like LUCIUS. The first heartbeat only records a baseline
+(no backlog flood); after that it reports deltas only.
 
 ## 3. Run it (keep it running)
 

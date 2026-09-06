@@ -66,6 +66,9 @@ ATHENA_TOKEN = _env("ATHENA_API_TOKEN")
 
 POLL_SECONDS = int(_env("BRIDGE_POLL_SECONDS", "15") or "15")
 JOB_TIMEOUT = int(_env("BRIDGE_JOB_TIMEOUT", "1800") or "1800")  # 30 min
+# Heartbeat: how often to mirror ATHENA's own autonomous activity into ORELIUS
+# shared memory (so ORELIUS knows what ATHENA did on its own, like LUCIUS does).
+HEARTBEAT_SECONDS = int(_env("BRIDGE_HEARTBEAT_SECONDS", "600") or "600")  # 10 min
 STATE_FILE = Path(_env("BRIDGE_STATE_FILE", "") or (Path(__file__).resolve().parent / "athena_bridge_state.json"))
 
 # ATHENA's /jobs API accepts these actions; anything else is coerced to "once".
@@ -80,16 +83,24 @@ def log(msg: str) -> None:
 
 
 # ----------------------------------------------------------------- state
-def _load_last_id() -> int:
+def load_state() -> dict:
+    """Full bridge state: last processed request id + heartbeat bookkeeping."""
     try:
-        return int(json.loads(STATE_FILE.read_text()).get("last_id", 0))
+        s = json.loads(STATE_FILE.read_text())
+        if isinstance(s, dict):
+            s.setdefault("last_id", 0)
+            s.setdefault("seen_flagged", [])
+            s.setdefault("last_scheduled", 0)
+            s.setdefault("hb_seeded", False)
+            return s
     except Exception:
-        return 0
+        pass
+    return {"last_id": 0, "seen_flagged": [], "last_scheduled": 0, "hb_seeded": False}
 
 
-def _save_last_id(last_id: int) -> None:
+def save_state(state: dict) -> None:
     try:
-        STATE_FILE.write_text(json.dumps({"last_id": last_id}))
+        STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
         log(f"warn: could not persist state ({e})")
 
@@ -112,8 +123,9 @@ def fetch_events(limit: int = 50) -> list[dict]:
     return []
 
 
-def write_result(content: str, meta: dict) -> None:
-    payload = {"content": content, "kind": "design_result", "actor": "ATHENA", "meta": meta}
+def write_event(content: str, kind: str, meta: dict) -> bool:
+    """Write one event into ORELIUS shared memory as actor ATHENA."""
+    payload = {"content": content, "kind": kind, "actor": "ATHENA", "meta": meta}
     for attempt in range(2):
         try:
             r = requests.post(
@@ -123,12 +135,17 @@ def write_result(content: str, meta: dict) -> None:
                 timeout=20,
             )
             if r.status_code < 400:
-                return
+                return True
             log(f"ORELIUS POST /api/memory -> {r.status_code}")
         except Exception as e:
             log(f"ORELIUS unreachable on write ({e})")
         if attempt == 0:
             time.sleep(2)
+    return False
+
+
+def write_result(content: str, meta: dict) -> None:
+    write_event(content, "design_result", meta)
 
 
 # ----------------------------------------------------------------- ATHENA
@@ -190,6 +207,82 @@ def athena_wait(job_id: str) -> dict:
         time.sleep(5)
     last["state"] = last.get("state") or "timeout"
     return last
+
+
+# ----------------------------------------------------------------- heartbeat
+def athena_status() -> dict | None:
+    """GET ATHENA's current status snapshot (scheduled / flagged / in-flight)."""
+    try:
+        r = requests.get(f"{ATHENA_BASE_URL}/status", headers=_ATHENA_HEADERS, timeout=15)
+        if r.status_code == 200:
+            return r.json()
+        log(f"ATHENA GET /status -> {r.status_code}")
+    except Exception as e:
+        log(f"ATHENA status unreachable ({e})")
+    return None
+
+
+def heartbeat(state: dict) -> None:
+    """Mirror ATHENA's own autonomous activity into ORELIUS shared memory.
+
+    On first run it just records a baseline (so ORELIUS isn't flooded with the
+    existing backlog). After that it reports only NEW activity: posts ATHENA
+    newly scheduled to the feed, and posts it newly flagged below its gate.
+    """
+    st = athena_status()
+    if not st:
+        return
+
+    handle = st.get("brandHandle") or "the brand"
+    scheduled = int(st.get("scheduledUpcoming") or 0)
+    flagged = st.get("flaggedForReview") or []
+    flagged_ids = [int(f.get("id")) for f in flagged if f.get("id") is not None]
+    seen = set(state.get("seen_flagged", []))
+
+    # First heartbeat: seed the baseline, announce once, don't spam the backlog.
+    if not state.get("hb_seeded"):
+        write_event(
+            f"ATHENA is online for {handle} — {scheduled} post(s) scheduled, {len(flagged_ids)} held for review.",
+            "athena_activity",
+            {"type": "online", "scheduled": scheduled, "flagged": len(flagged_ids), "handle": handle},
+        )
+        state["seen_flagged"] = flagged_ids[-200:]
+        state["last_scheduled"] = scheduled
+        state["hb_seeded"] = True
+        save_state(state)
+        return
+
+    changed = False
+
+    # Newly scheduled posts (queue grew) → ATHENA published/scheduled on its own.
+    if scheduled > int(state.get("last_scheduled", 0)):
+        diff = scheduled - int(state["last_scheduled"])
+        write_event(
+            f"ATHENA scheduled {diff} new post(s) to {handle}'s feed ({scheduled} upcoming).",
+            "athena_activity",
+            {"type": "scheduled", "new": diff, "upcoming": scheduled, "handle": handle},
+        )
+        changed = True
+    if scheduled != int(state.get("last_scheduled", 0)):
+        state["last_scheduled"] = scheduled
+        changed = True
+
+    # Newly flagged posts → ATHENA created content that didn't clear its gate.
+    new_flagged = [f for f in flagged if int(f.get("id", -1)) not in seen]
+    for f in new_flagged[:5]:  # cap per beat to avoid a burst
+        theme = str(f.get("theme") or "").strip()[:180]
+        write_event(
+            f"ATHENA created a post held for review (score {f.get('score')}): “{theme}”.",
+            "athena_activity",
+            {"type": "flagged", "post_id": f.get("id"), "score": f.get("score"), "handle": handle},
+        )
+    if new_flagged:
+        seen.update(int(f.get("id")) for f in flagged if f.get("id") is not None)
+        state["seen_flagged"] = sorted(seen)[-200:]
+        changed = True
+
+    if changed:
+        save_state(state)
 
 
 # ----------------------------------------------------------------- loop
@@ -256,9 +349,14 @@ def main() -> None:
     if not ATHENA_TOKEN:
         log("WARNING: ATHENA_API_TOKEN is empty — ATHENA will reject jobs until it's set.")
 
-    last_id = _load_last_id()
-    log(f"Bridge online. ORELIUS={ORELIUS_URL}  ATHENA={ATHENA_BASE_URL}  last_id={last_id}")
+    state = load_state()
+    last_id = int(state.get("last_id", 0))
+    log(
+        f"Bridge online. ORELIUS={ORELIUS_URL}  ATHENA={ATHENA_BASE_URL}  "
+        f"last_id={last_id}  heartbeat={HEARTBEAT_SECONDS}s"
+    )
 
+    last_hb = 0.0
     while True:
         try:
             events = fetch_events(limit=50)
@@ -273,11 +371,17 @@ def main() -> None:
                 try:
                     handle_request(ev)
                     last_id = max(last_id, ev_id)
-                    _save_last_id(last_id)
+                    state["last_id"] = last_id
+                    save_state(state)
                 except Exception as e:
                     # Don't advance last_id: this request will be retried next cycle.
                     log(f"design_request #{ev_id} deferred ({e})")
                     break
+
+            # Heartbeat: mirror ATHENA's own autonomous activity into shared memory.
+            if time.time() - last_hb >= HEARTBEAT_SECONDS:
+                heartbeat(state)
+                last_hb = time.time()
         except Exception as e:  # noqa: BLE001 - the loop must never die
             log(f"loop error ({e})")
         time.sleep(POLL_SECONDS)
