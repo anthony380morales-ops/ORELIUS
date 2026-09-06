@@ -18,6 +18,7 @@ Bureau of Economic Analysis (BEA), U.S. Treasury (Fiscal Data), FDIC.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional
@@ -100,11 +101,15 @@ class FinanceIntel:
 
     # ---------------------------------------------------------------- fetchers
     async def _fred_items(self, client: httpx.AsyncClient, series, source_label: str) -> List[Dict]:
-        """One item per series — its latest observation, with change vs prior."""
-        items: List[Dict] = []
+        """One item per series — its latest observation, with change vs prior.
+
+        Series are fetched concurrently so the whole set finishes in ~one call's
+        time (keeps the run well within free-tier request limits).
+        """
         if not settings.fred_api_key:
-            return items
-        for series_id, label, unit, category in series:
+            return []
+
+        async def one(series_id, label, unit, category) -> Optional[Dict]:
             try:
                 r = await client.get(
                     "https://api.stlouisfed.org/fred/series/observations",
@@ -117,27 +122,26 @@ class FinanceIntel:
                     },
                 )
                 if r.status_code != 200:
-                    continue
+                    return None
                 obs = [o for o in r.json().get("observations", []) if o.get("value") not in (".", None, "")]
                 if not obs:
-                    continue
+                    return None
                 latest = obs[0]
                 prior = obs[1] if len(obs) > 1 else None
-                cur, prev = _num(latest.get("value")), _num(prior.get("value")) if prior else None
+                cur, prev = _num(latest.get("value")), (_num(prior.get("value")) if prior else None)
                 change = round(cur - prev, 4) if (cur is not None and prev is not None) else None
-                items.append({
+                return {
                     "key": f"fred:{series_id}:{latest.get('date')}",
-                    "source": source_label,
-                    "category": category,
-                    "label": label,
-                    "unit": unit,
-                    "date": latest.get("date"),
-                    "value": latest.get("value"),
-                    "change_vs_prior": change,
-                })
+                    "source": source_label, "category": category, "label": label,
+                    "unit": unit, "date": latest.get("date"),
+                    "value": latest.get("value"), "change_vs_prior": change,
+                }
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"FRED {series_id} failed: {e}")
-        return items
+                return None
+
+        results = await asyncio.gather(*(one(*s) for s in series))
+        return [it for it in results if it]
 
     async def _treasury_items(self, client: httpx.AsyncClient) -> List[Dict]:
         items: List[Dict] = []
@@ -237,13 +241,15 @@ class FinanceIntel:
     # ------------------------------------------------------------ gather + filter
     async def _gather_all(self) -> List[Dict]:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            items: List[Dict] = []
-            items += await self._fred_items(client, _FRED_SERIES, "FRED (Federal Reserve)")
-            items += await self._fred_items(client, _MOODYS_SERIES, "Moody's")
-            items += await self._bea_items(client)
-            items += await self._treasury_items(client)
-            items += await self._fdic_items(client)
-            return items
+            # All sources concurrently — the run takes ~one slow call, not the sum.
+            fred, moodys, bea, treasury, fdic = await asyncio.gather(
+                self._fred_items(client, _FRED_SERIES, "FRED (Federal Reserve)"),
+                self._fred_items(client, _MOODYS_SERIES, "Moody's"),
+                self._bea_items(client),
+                self._treasury_items(client),
+                self._fdic_items(client),
+            )
+            return fred + moodys + bea + treasury + fdic
 
     def _filter_new(self, items: List[Dict], seen: Dict[str, str], since: date) -> List[Dict]:
         """Keep only items within the lookback window that we haven't reported."""
