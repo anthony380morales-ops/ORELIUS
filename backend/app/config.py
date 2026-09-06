@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     fred_api_key: str = ""
     # Free BEA API key (https://apps.bea.gov/API/signup/) for GDP/output data.
     bea_api_key: str = ""
+    # Daily intel: never retrieve data older than this many days (the 2-month barrier).
+    finance_lookback_days: int = 60
 
     # Google Sheets
     google_sheets_credentials_file: str = "./google-credentials.json"

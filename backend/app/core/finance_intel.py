@@ -1,306 +1,328 @@
 """
-O.R.E.L.I.U.S. Daily Financial Intelligence
--------------------------------------------
-Pulls hard numbers from OFFICIAL, verified U.S. government sources, then has the
-ORELIUS Haiku brain synthesize a factual daily briefing grounded ONLY in those
-numbers (no speculation, every figure sourced). Runs on demand or on a daily
-schedule (8:00 AM PST) via /api/automation/finance-brief.
+O.R.E.L.I.U.S. Daily Economic Intelligence
+------------------------------------------
+Every day the automation scans official U.S. sources for NEWLY-RELEASED verified
+data (rates, inflation, jobs, growth, credit, markets, banking, fiscal), then has
+the Haiku brain condense it into plain-English intelligence — stacked against life
+insurance, annuities, and personal/employer retirement accounts, with pros & cons.
 
-Sources (authoritative, primary):
-  * FRED  — Federal Reserve Bank of St. Louis (needs a free FRED_API_KEY)
-  * U.S. Treasury Fiscal Data — api.fiscaldata.treasury.gov (no key)
-  * FDIC  — banks.data.fdic.gov (no key)
+Design rules the Master set:
+  * VERIFIED ONLY — official data endpoints (the machine-readable form of each
+    agency's website). Never fabricate a figure.
+  * 2-MONTH BARRIER — never retrieve data older than `finance_lookback_days`.
+  * NO REPEATS — a durable memory (AutomationState) records every data point
+    already reported; each run surfaces only what is new.
 
-Everything is best-effort: a source that fails is simply omitted, and the brief
-is written from whatever verified data was retrieved.
+Sources: FRED (Federal Reserve), Moody's corporate-bond yields (via FRED), U.S.
+Bureau of Economic Analysis (BEA), U.S. Treasury (Fiscal Data), FDIC.
 """
 from __future__ import annotations
 
-from datetime import datetime
+import re
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..utils.logger import logger
 from .claude_client import claude_client
 from .shared_memory import shared_memory
-
-# FRED series we track (id -> human label + unit hint).
-_FRED_SERIES = [
-    ("FEDFUNDS", "Federal Funds Rate", "%"),
-    ("DGS10", "10-Year Treasury Yield", "%"),
-    ("T10Y2Y", "10Y-2Y Treasury Spread (yield curve)", "%"),
-    ("UNRATE", "Unemployment Rate", "%"),
-    ("CPIAUCSL", "CPI (Consumer Price Index, level)", "index"),
-    ("MORTGAGE30US", "30-Year Fixed Mortgage Rate", "%"),
-]
-
-# Moody's corporate-bond yields — Moody's is the SOURCE; FRED redistributes them
-# free. Central to life-insurance analysis (insurers hold huge corporate-bond
-# books; credit spreads drive investment income and risk).
-_MOODYS_SERIES = [
-    ("DAAA", "Moody's Seasoned Aaa Corporate Bond Yield", "%"),
-    ("DBAA", "Moody's Seasoned Baa Corporate Bond Yield", "%"),
-    ("BAA10Y", "Moody's Baa Corporate Bond Spread over 10-Yr Treasury", "%"),
-]
+from ..models.automation_state import AutomationState  # noqa: F401  (register table)
 
 _HTTP_TIMEOUT = 20.0
+_SEEN_KEY = "finance_seen"
+
+# FRED series — broad economy, not just yields.  (id, label, unit, category)
+_FRED_SERIES = [
+    ("FEDFUNDS", "Federal Funds Rate", "%", "Rates"),
+    ("DGS10", "10-Year Treasury Yield", "%", "Rates"),
+    ("DGS2", "2-Year Treasury Yield", "%", "Rates"),
+    ("T10Y2Y", "10Y–2Y Treasury Spread (yield curve)", "%", "Rates"),
+    ("MORTGAGE30US", "30-Year Fixed Mortgage Rate", "%", "Rates"),
+    ("CPIAUCSL", "CPI — Consumer Price Index", "index", "Inflation"),
+    ("CPILFESL", "Core CPI (ex food & energy)", "index", "Inflation"),
+    ("PCEPI", "PCE Price Index (Fed's gauge)", "index", "Inflation"),
+    ("UNRATE", "Unemployment Rate", "%", "Jobs"),
+    ("PAYEMS", "Nonfarm Payrolls (total jobs)", "thousands", "Jobs"),
+    ("ICSA", "Initial Jobless Claims (weekly)", "count", "Jobs"),
+    ("INDPRO", "Industrial Production Index", "index", "Growth"),
+    ("RSAFS", "Retail Sales", "$ mil", "Growth"),
+    ("UMCSENT", "Consumer Sentiment (U. Michigan)", "index", "Consumer"),
+    ("PSAVERT", "Personal Saving Rate", "%", "Consumer"),
+    ("HOUST", "Housing Starts", "thousands", "Housing"),
+    ("SP500", "S&P 500 Index", "index", "Markets"),
+    ("VIXCLS", "Volatility Index (VIX)", "index", "Markets"),
+]
+
+# Moody's corporate-bond yields — Moody's is the SOURCE; FRED redistributes free.
+_MOODYS_SERIES = [
+    ("DAAA", "Moody's Aaa Corporate Bond Yield", "%", "Credit"),
+    ("DBAA", "Moody's Baa Corporate Bond Yield", "%", "Credit"),
+    ("BAA10Y", "Moody's Baa Spread over 10-Yr Treasury", "%", "Credit"),
+]
+
+
+def _parse_date(s: Optional[str]) -> Optional[date]:
+    """Parse the common date shapes these APIs return into a date."""
+    if not s:
+        return None
+    s = str(s).strip()
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        try:
+            return date(int(m[1]), int(m[2]), int(m[3]))
+        except ValueError:
+            return None
+    m = re.match(r"^(\d{4})Q([1-4])$", s)          # BEA quarterly, e.g. 2026Q1
+    if m:
+        return date(int(m[1]), int(m[2]) * 3, 28)
+    m = re.match(r"^(\d{4})M(\d{2})$", s)           # BEA monthly, e.g. 2026M07
+    if m:
+        return date(int(m[1]), int(m[2]), 28)
+    m = re.match(r"^(\d{4})-(\d{2})$", s)
+    if m:
+        return date(int(m[1]), int(m[2]), 1)
+    return None
+
+
+def _num(v) -> Optional[float]:
+    try:
+        return float(str(v).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
 
 
 class FinanceIntel:
-    """Gathers verified financial data and produces a grounded daily briefing."""
+    """Scans verified sources for newly-released data and briefs on it."""
 
     # ---------------------------------------------------------------- fetchers
-    async def _fred_series(self, client: httpx.AsyncClient, series_id: str) -> Optional[Dict]:
-        """Latest two observations for a FRED series (value + prior, for a delta)."""
+    async def _fred_items(self, client: httpx.AsyncClient, series, source_label: str) -> List[Dict]:
+        """One item per series — its latest observation, with change vs prior."""
+        items: List[Dict] = []
         if not settings.fred_api_key:
-            return None
+            return items
+        for series_id, label, unit, category in series:
+            try:
+                r = await client.get(
+                    "https://api.stlouisfed.org/fred/series/observations",
+                    params={
+                        "series_id": series_id,
+                        "api_key": settings.fred_api_key,
+                        "file_type": "json",
+                        "sort_order": "desc",
+                        "limit": 6,
+                    },
+                )
+                if r.status_code != 200:
+                    continue
+                obs = [o for o in r.json().get("observations", []) if o.get("value") not in (".", None, "")]
+                if not obs:
+                    continue
+                latest = obs[0]
+                prior = obs[1] if len(obs) > 1 else None
+                cur, prev = _num(latest.get("value")), _num(prior.get("value")) if prior else None
+                change = round(cur - prev, 4) if (cur is not None and prev is not None) else None
+                items.append({
+                    "key": f"fred:{series_id}:{latest.get('date')}",
+                    "source": source_label,
+                    "category": category,
+                    "label": label,
+                    "unit": unit,
+                    "date": latest.get("date"),
+                    "value": latest.get("value"),
+                    "change_vs_prior": change,
+                })
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"FRED {series_id} failed: {e}")
+        return items
+
+    async def _treasury_items(self, client: httpx.AsyncClient) -> List[Dict]:
+        items: List[Dict] = []
+        base = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
         try:
-            r = await client.get(
-                "https://api.stlouisfed.org/fred/series/observations",
-                params={
-                    "series_id": series_id,
-                    "api_key": settings.fred_api_key,
-                    "file_type": "json",
-                    "sort_order": "desc",
-                    "limit": 2,
-                },
-            )
-            if r.status_code != 200:
-                logger.debug(f"FRED {series_id} -> {r.status_code}")
-                return None
-            obs = [o for o in r.json().get("observations", []) if o.get("value") not in (".", None)]
-            if not obs:
-                return None
-            latest = obs[0]
-            prior = obs[1] if len(obs) > 1 else None
-            out = {"date": latest.get("date"), "value": latest.get("value")}
-            if prior:
-                out["prior_value"] = prior.get("value")
-                out["prior_date"] = prior.get("date")
-            return out
+            r = await client.get(base + "v2/accounting/od/debt_to_penny",
+                                 params={"sort": "-record_date", "page[size]": "1", "format": "json"})
+            if r.status_code == 200 and r.json().get("data"):
+                row = r.json()["data"][0]
+                items.append({
+                    "key": f"treasury:debt:{row.get('record_date')}",
+                    "source": "U.S. Treasury", "category": "Fiscal",
+                    "label": "National Debt", "unit": "$", "date": row.get("record_date"),
+                    "value": row.get("tot_pub_debt_out_amt"), "change_vs_prior": None,
+                })
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"FRED {series_id} fetch failed: {e}")
-            return None
-
-    async def _treasury(self, client: httpx.AsyncClient) -> Dict:
-        """U.S. Treasury Fiscal Data: national debt + average interest rate."""
-        out: Dict = {}
+            logger.debug(f"Treasury debt failed: {e}")
         try:
-            r = await client.get(
-                "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
-                "v2/accounting/od/debt_to_penny",
-                params={"sort": "-record_date", "page[size]": "1", "format": "json"},
-            )
-            if r.status_code == 200:
-                rows = r.json().get("data", [])
-                if rows:
-                    out["national_debt"] = {
-                        "date": rows[0].get("record_date"),
-                        "total_debt_usd": rows[0].get("tot_pub_debt_out_amt"),
-                    }
+            r = await client.get(base + "v2/accounting/od/avg_interest_rates",
+                                 params={"sort": "-record_date", "page[size]": "1", "format": "json"})
+            if r.status_code == 200 and r.json().get("data"):
+                row = r.json()["data"][0]
+                items.append({
+                    "key": f"treasury:avgrate:{row.get('record_date')}",
+                    "source": "U.S. Treasury", "category": "Fiscal",
+                    "label": f"Avg interest rate on federal debt ({row.get('security_desc')})",
+                    "unit": "%", "date": row.get("record_date"),
+                    "value": row.get("avg_interest_rate_amt"), "change_vs_prior": None,
+                })
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"Treasury debt fetch failed: {e}")
+            logger.debug(f"Treasury rates failed: {e}")
+        return items
+
+    async def _fdic_items(self, client: httpx.AsyncClient) -> List[Dict]:
+        items: List[Dict] = []
         try:
-            r = await client.get(
-                "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
-                "v2/accounting/od/avg_interest_rates",
-                params={"sort": "-record_date", "page[size]": "1", "format": "json"},
-            )
-            if r.status_code == 200:
-                rows = r.json().get("data", [])
-                if rows:
-                    out["avg_interest_rate"] = {
-                        "date": rows[0].get("record_date"),
-                        "security": rows[0].get("security_desc"),
-                        "avg_rate_pct": rows[0].get("avg_interest_rate_amt"),
-                    }
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Treasury rates fetch failed: {e}")
-        return out
-
-    async def _fdic(self, client: httpx.AsyncClient) -> Dict:
-        """FDIC banking-health signals: active-institution count + recent failures.
-
-        Uses the BankFind Suite API (no key). The institutions count is reliably
-        populated; failures are sparse (few per year) so they may be empty.
-        """
-        out: Dict = {}
-
-        # Active FDIC-insured institutions (industry footprint) — meta.total.
-        try:
-            r = await client.get(
-                "https://banks.data.fdic.gov/api/institutions",
-                params={"filters": "ACTIVE:1", "fields": "NAME", "limit": "1", "format": "json"},
-            )
+            r = await client.get("https://banks.data.fdic.gov/api/institutions",
+                                 params={"filters": "ACTIVE:1", "fields": "NAME", "limit": "1", "format": "json"})
             if r.status_code == 200:
                 total = ((r.json() or {}).get("meta") or {}).get("total")
                 if total is not None:
-                    out["active_insured_institutions"] = total
-            else:
-                logger.debug(f"FDIC institutions -> {r.status_code}")
+                    items.append({
+                        "key": f"fdic:institutions:{total}",
+                        "source": "FDIC", "category": "Banking",
+                        "label": "Active FDIC-insured institutions", "unit": "count",
+                        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+                        "value": total, "change_vs_prior": None,
+                    })
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"FDIC institutions fetch failed: {e}")
-
-        # Most recent bank failures (year-to-date signal).
+            logger.debug(f"FDIC institutions failed: {e}")
         try:
-            r = await client.get(
-                "https://banks.data.fdic.gov/api/failures",
-                params={
-                    "fields": "NAME,PSTALP,FAILDATE,COST,RESTYPE",
-                    "sort_by": "FAILDATE",
-                    "sort_order": "DESC",
-                    "limit": "3",
-                    "format": "json",
-                },
-            )
+            r = await client.get("https://banks.data.fdic.gov/api/failures",
+                                 params={"fields": "NAME,PSTALP,FAILDATE,COST", "sort_by": "FAILDATE",
+                                         "sort_order": "DESC", "limit": "5", "format": "json"})
             if r.status_code == 200:
-                rows = (r.json() or {}).get("data", []) or []
-                failures = [(row.get("data") if isinstance(row.get("data"), dict) else row) for row in rows]
-                out["recent_bank_failures"] = failures
-            else:
-                logger.debug(f"FDIC failures -> {r.status_code}")
+                for row in (r.json() or {}).get("data", []) or []:
+                    d = row.get("data") if isinstance(row.get("data"), dict) else row
+                    fd = str(d.get("FAILDATE", ""))[:10]
+                    items.append({
+                        "key": f"fdic:failure:{d.get('NAME')}:{fd}",
+                        "source": "FDIC", "category": "Banking",
+                        "label": f"Bank failure: {d.get('NAME')} ({d.get('PSTALP')})",
+                        "unit": "", "date": fd, "value": "failed", "change_vs_prior": None,
+                    })
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"FDIC failures fetch failed: {e}")
+            logger.debug(f"FDIC failures failed: {e}")
+        return items
 
-        return out
-
-    async def _bea(self, client: httpx.AsyncClient) -> Dict:
-        """U.S. Bureau of Economic Analysis (BEA) — real GDP growth. Needs BEA_API_KEY."""
+    async def _bea_items(self, client: httpx.AsyncClient) -> List[Dict]:
         if not settings.bea_api_key:
-            return {}
+            return []
         try:
             years = ",".join(str(datetime.utcnow().year - i) for i in range(0, 2))
-            r = await client.get(
-                "https://apps.bea.gov/api/data",
-                params={
-                    "UserID": settings.bea_api_key,
-                    "method": "GetData",
-                    "datasetname": "NIPA",
-                    "TableName": "T10101",  # percent change from preceding period, real GDP
-                    "Frequency": "Q",
-                    "Year": years,
-                    "ResultFormat": "JSON",
-                },
-            )
+            r = await client.get("https://apps.bea.gov/api/data", params={
+                "UserID": settings.bea_api_key, "method": "GetData", "datasetname": "NIPA",
+                "TableName": "T10101", "Frequency": "Q", "Year": years, "ResultFormat": "JSON"})
             if r.status_code != 200:
-                logger.debug(f"BEA -> {r.status_code}")
-                return {}
+                return []
             results = ((r.json() or {}).get("BEAAPI") or {}).get("Results") or {}
-            rows = results.get("Data") if isinstance(results, dict) else None
-            if not rows and isinstance(results, list) and results:
-                rows = results[0].get("Data")
-            if not rows:
-                return {}
-            # Line 1 = Gross domestic product; take the latest quarter present.
-            gdp_rows = [d for d in rows if str(d.get("LineNumber")) == "1"]
-            if not gdp_rows:
-                return {}
-            latest = sorted(gdp_rows, key=lambda d: str(d.get("TimePeriod")))[-1]
-            return {
-                "real_gdp_growth": {
-                    "period": latest.get("TimePeriod"),
-                    "pct_change_annualized": latest.get("DataValue"),
-                    "measure": latest.get("LineDescription") or "Real GDP, % change (annualized)",
-                }
-            }
+            rows = results.get("Data") if isinstance(results, dict) else (
+                results[0].get("Data") if isinstance(results, list) and results else None)
+            gdp = [d for d in (rows or []) if str(d.get("LineNumber")) == "1"]
+            if not gdp:
+                return []
+            latest = sorted(gdp, key=lambda d: str(d.get("TimePeriod")))[-1]
+            return [{
+                "key": f"bea:gdp:{latest.get('TimePeriod')}",
+                "source": "U.S. Bureau of Economic Analysis (BEA)", "category": "Growth",
+                "label": "Real GDP growth (annualized, % change)", "unit": "%",
+                "date": latest.get("TimePeriod"), "value": latest.get("DataValue"),
+                "change_vs_prior": None,
+            }]
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"BEA fetch failed: {e}")
-            return {}
+            logger.debug(f"BEA failed: {e}")
+            return []
 
-    async def gather_data(self) -> Dict:
-        """Collect all verified figures into one structured payload."""
-        data: Dict = {"as_of": datetime.utcnow().isoformat() + "Z", "sources": {}}
+    # ------------------------------------------------------------ gather + filter
+    async def _gather_all(self) -> List[Dict]:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            # FRED — core macro (rates, inflation, jobs, mortgages)
-            fred: Dict = {}
-            for series_id, label, unit in _FRED_SERIES:
-                obs = await self._fred_series(client, series_id)
-                if obs:
-                    fred[series_id] = {"label": label, "unit": unit, **obs}
-            if fred:
-                data["sources"]["FRED (Federal Reserve, St. Louis)"] = fred
+            items: List[Dict] = []
+            items += await self._fred_items(client, _FRED_SERIES, "FRED (Federal Reserve)")
+            items += await self._fred_items(client, _MOODYS_SERIES, "Moody's")
+            items += await self._bea_items(client)
+            items += await self._treasury_items(client)
+            items += await self._fdic_items(client)
+            return items
 
-            # Moody's — corporate bond yields / credit spreads (via FRED redistribution)
-            moodys: Dict = {}
-            for series_id, label, unit in _MOODYS_SERIES:
-                obs = await self._fred_series(client, series_id)
-                if obs:
-                    moodys[series_id] = {"label": label, "unit": unit, **obs}
-            if moodys:
-                data["sources"]["Moody's (corporate bond yields)"] = moodys
-
-            # BEA — output/growth
-            bea = await self._bea(client)
-            if bea:
-                data["sources"]["U.S. Bureau of Economic Analysis (BEA)"] = bea
-
-            # U.S. Treasury — fiscal
-            treasury = await self._treasury(client)
-            if treasury:
-                data["sources"]["U.S. Treasury (Fiscal Data)"] = treasury
-
-            # FDIC — banking health
-            fdic = await self._fdic(client)
-            if fdic:
-                data["sources"]["FDIC"] = fdic
-        return data
+    def _filter_new(self, items: List[Dict], seen: Dict[str, str], since: date) -> List[Dict]:
+        """Keep only items within the lookback window that we haven't reported."""
+        fresh: List[Dict] = []
+        for it in items:
+            d = _parse_date(it.get("date"))
+            if d is None or d < since:      # 2-month barrier — never reach past it
+                continue
+            if it["key"] in seen:           # already informed — no repeats
+                continue
+            fresh.append(it)
+        return fresh
 
     # ---------------------------------------------------------------- synthesis
     def _system_prompt(self) -> str:
         return (
-            "You are ORELIUS, delivering the Master's daily U.S. economic "
-            "intelligence briefing, focused through the lens of the LIFE INSURANCE "
-            "industry. You are given ONLY verified figures pulled live from official "
-            "sources: Federal Reserve/FRED, Moody's (corporate bond yields), U.S. "
-            "Bureau of Economic Analysis (BEA), U.S. Treasury, and FDIC.\n\n"
-            "HARD RULES (never break):\n"
-            "1. Use ONLY the numbers provided in the data below. Never invent, "
-            "estimate, or add any figure not present.\n"
-            "2. For every number, name its source (FRED, Moody's, BEA, Treasury, or "
-            "FDIC) and its date.\n"
-            "3. Where a prior value is given, state the change (up/down) plainly.\n"
-            "4. If a source is missing, say so — never fabricate to fill a gap.\n\n"
-            "YOUR JOB — gather, then compress into a cohesive understanding. Structure:\n"
-            "• **Economy Snapshot** — the key verified figures (rates, credit spreads, "
-            "growth, jobs, inflation, fiscal, banking), each sourced and dated.\n"
-            "• **Life-Insurance Read** — stack that economy against the U.S. life "
-            "insurance business: how these exact numbers affect insurers' investment "
-            "income and bond portfolios (Moody's Aaa/Baa yields and spreads, 10-Yr "
-            "Treasury), product pricing and crediting rates, annuity/IUL demand, "
-            "credit and reinvestment risk, and capital. Tie each point to a figure "
-            "above. Factor in standing U.S. tax treatment where relevant (IRS rules "
-            "you already know — e.g. §7702 definition of life insurance and tax-"
-            "deferred inside build-up, §1035 exchanges, §7702B for LTC riders, the "
-            "§7520 valuation rate). Label these clearly as standing tax rules, not "
-            "live figures.\n"
-            "• **Cohesive Summary** — 2-4 tight sentences condensing everything into "
-            "one clear read for the Master: what today's data means for the life "
-            "insurance opportunity, stated plainly.\n\n"
-            "Be disciplined and concise. Address the reader as 'Master'."
+            "You are ORELIUS, delivering the Master's daily U.S. economic intelligence. "
+            "You are given ONLY newly-released, verified figures from official sources "
+            "(Federal Reserve/FRED, Moody's, BEA, U.S. Treasury, FDIC). Everything below "
+            "is NEW since your last briefing.\n\n"
+            "HARD RULES:\n"
+            "1. Use ONLY the numbers provided. Never invent or estimate a figure.\n"
+            "2. Cite each figure's source and date.\n"
+            "3. Write in SIMPLE, plain terms a non-expert can follow. No jargon without "
+            "a plain-English gloss.\n\n"
+            "STRUCTURE:\n"
+            "• **What's New Today** — the newly-released figures, grouped simply "
+            "(rates, inflation, jobs, growth, credit, markets, banking, fiscal). One "
+            "short line each, sourced + dated, with the change if given.\n"
+            "• **Weigh-Ins — Pros & Cons** — for the themes that moved, explain in plain "
+            "terms how this data could AFFECT or BENEFIT each of these, with explicit "
+            "PROS and CONS for each:\n"
+            "   – Life insurance policies (whole/term/IUL) and the insurers behind them\n"
+            "   – Annuities (fixed, indexed, income)\n"
+            "   – Individuals' bank savings (savings, CDs, money-market)\n"
+            "   – Employer/retirement accounts (401(k), IRA, pensions)\n"
+            "Tie every point to a figure above. Factor in standing IRS tax treatment "
+            "where relevant (e.g. §7702 tax-deferred build-up, §1035 exchanges, 401(k)/"
+            "IRA tax rules) — label these as standing rules, not live figures.\n"
+            "• **Bottom Line** — 2–4 tight sentences in simple terms: what today's data "
+            "means for the Master, plainly.\n\n"
+            "Address the reader as 'Master'."
         )
 
     async def generate_brief(self, db: AsyncSession) -> Dict:
-        """Fetch data, synthesize the grounded briefing, persist it, return it."""
-        data = await self.gather_data()
+        lookback = max(1, int(getattr(settings, "finance_lookback_days", 60)))
+        since = (datetime.utcnow() - timedelta(days=lookback)).date()
 
-        if not data.get("sources"):
+        seen = await self._load_seen(db)
+        try:
+            items = await self._gather_all()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"finance gather failed: {e}")
+            items = []
+
+        fresh = self._filter_new(items, seen, since)
+
+        if not fresh:
             msg = (
-                "Master, I could not retrieve any verified financial data this cycle "
-                "(all official sources were unreachable or no FRED key is set). No "
-                "briefing was fabricated. I will retry on the next run."
+                "Master, no newly-released verified data has appeared across the tracked "
+                f"sources within the last {lookback} days that I haven't already briefed "
+                "you on. Nothing to repeat — I will report the moment new data lands."
             )
-            await self._record(db, msg, data, ok=False)
-            return {"ok": False, "summary": msg, "data": data}
+            await self._record(db, msg, {"as_of": datetime.utcnow().isoformat() + "Z", "new_items": 0}, ok=True)
+            return {"ok": True, "summary": msg, "data": {"new_items": 0}}
+
+        # Group the fresh items by source for a clean, cited payload.
+        by_source: Dict[str, list] = {}
+        for it in fresh:
+            by_source.setdefault(it["source"], []).append({
+                "metric": it["label"], "category": it["category"], "value": it["value"],
+                "unit": it["unit"], "date": it["date"], "change_vs_prior": it["change_vs_prior"],
+            })
+        data = {"as_of": datetime.utcnow().isoformat() + "Z", "lookback_days": lookback,
+                "new_items": len(fresh), "sources": by_source}
 
         import json as _json
-        user_msg = (
-            "Here is today's verified data. Write the daily financial intelligence "
-            "briefing using ONLY these figures, citing source + date for each:\n\n"
-            + _json.dumps(data["sources"], indent=2)
-        )
+        user_msg = ("Here is TODAY'S newly-released verified data (already filtered to new "
+                    "items only). Brief the Master per your rules:\n\n" + _json.dumps(by_source, indent=2))
         try:
             brief = await claude_client.chat(
                 messages=[{"role": "user", "content": user_msg}],
@@ -309,19 +331,50 @@ class FinanceIntel:
                 max_tokens=settings.oreilus_report_max_tokens,
             )
         except Exception as e:  # noqa: BLE001
-            logger.error(f"finance brief synthesis failed: {e}")
-            brief = "Master, verified data was retrieved but synthesis failed this cycle."
+            logger.error(f"finance synthesis failed: {e}")
+            brief = "Master, new data was retrieved but synthesis failed this cycle."
+
+        # Remember what we just reported, and prune anything past the barrier.
+        for it in fresh:
+            seen[it["key"]] = it["date"] or datetime.utcnow().strftime("%Y-%m-%d")
+        seen = {k: v for k, v in seen.items() if (_parse_date(v) or since) >= since}
+        await self._save_seen(db, seen)
 
         await self._record(db, brief, data, ok=True)
         return {"ok": True, "summary": brief, "data": data}
 
+    # ---------------------------------------------------------------- persistence
+    async def _load_seen(self, db: AsyncSession) -> Dict[str, str]:
+        try:
+            from ..models.automation_state import AutomationState
+            row = (await db.execute(
+                select(AutomationState).where(AutomationState.key == _SEEN_KEY)
+            )).scalars().first()
+            if row and isinstance(row.data, dict):
+                return dict(row.data.get("keys", {}))
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"load seen failed: {e}")
+        return {}
+
+    async def _save_seen(self, db: AsyncSession, seen: Dict[str, str]) -> None:
+        try:
+            from ..models.automation_state import AutomationState
+            row = (await db.execute(
+                select(AutomationState).where(AutomationState.key == _SEEN_KEY)
+            )).scalars().first()
+            if row:
+                row.data = {"keys": seen}
+            else:
+                db.add(AutomationState(key=_SEEN_KEY, data={"keys": seen}))
+            await db.flush()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"save seen failed: {e}")
+
     async def _record(self, db: AsyncSession, summary: str, data: Dict, ok: bool) -> None:
-        """Persist the briefing as a Report and push it into shared memory."""
-        # Store a Report row (durable, dashboard-readable).
         try:
             from ..models.report import Report, ReportType
             report = Report(
-                title=f"Daily Financial Intelligence — {datetime.utcnow():%Y-%m-%d}",
+                title=f"Daily Economic Intelligence — {datetime.utcnow():%Y-%m-%d}",
                 report_type=ReportType.BANKING_INTELLIGENCE,
                 report_date=datetime.utcnow(),
                 content=data,
@@ -329,20 +382,16 @@ class FinanceIntel:
             )
             db.add(report)
             await db.flush()
-        except Exception as e:  # noqa: BLE001 - never let persistence break the run
+        except Exception as e:  # noqa: BLE001
             logger.debug(f"finance report persist skipped: {e}")
-
-        # Push into shared memory so it surfaces in ORELIUS chat + LUCIUS/ATHENA.
         try:
             await shared_memory.remember(
-                db,
-                content=summary[:4000],
-                kind="finance_brief",
-                actor="ORELIUS",
-                meta={"ok": ok, "sources": list(data.get("sources", {}).keys())},
+                db, content=summary[:4000], kind="finance_brief", actor="ORELIUS",
+                meta={"ok": ok, "new_items": data.get("new_items"),
+                      "sources": list((data.get("sources") or {}).keys())},
             )
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"finance brief shared-memory write skipped: {e}")
+            logger.debug(f"finance shared-memory write skipped: {e}")
 
 
 # Global instance
