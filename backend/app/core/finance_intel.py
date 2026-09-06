@@ -37,6 +37,15 @@ _FRED_SERIES = [
     ("MORTGAGE30US", "30-Year Fixed Mortgage Rate", "%"),
 ]
 
+# Moody's corporate-bond yields — Moody's is the SOURCE; FRED redistributes them
+# free. Central to life-insurance analysis (insurers hold huge corporate-bond
+# books; credit spreads drive investment income and risk).
+_MOODYS_SERIES = [
+    ("DAAA", "Moody's Seasoned Aaa Corporate Bond Yield", "%"),
+    ("DBAA", "Moody's Seasoned Baa Corporate Bond Yield", "%"),
+    ("BAA10Y", "Moody's Baa Corporate Bond Spread over 10-Yr Treasury", "%"),
+]
+
 _HTTP_TIMEOUT = 20.0
 
 
@@ -112,13 +121,35 @@ class FinanceIntel:
             logger.debug(f"Treasury rates fetch failed: {e}")
         return out
 
-    async def _fdic_failures(self, client: httpx.AsyncClient) -> List[Dict]:
-        """Most recent FDIC bank failures (systemic-health signal)."""
+    async def _fdic(self, client: httpx.AsyncClient) -> Dict:
+        """FDIC banking-health signals: active-institution count + recent failures.
+
+        Uses the BankFind Suite API (no key). The institutions count is reliably
+        populated; failures are sparse (few per year) so they may be empty.
+        """
+        out: Dict = {}
+
+        # Active FDIC-insured institutions (industry footprint) — meta.total.
+        try:
+            r = await client.get(
+                "https://banks.data.fdic.gov/api/institutions",
+                params={"filters": "ACTIVE:1", "fields": "NAME", "limit": "1", "format": "json"},
+            )
+            if r.status_code == 200:
+                total = ((r.json() or {}).get("meta") or {}).get("total")
+                if total is not None:
+                    out["active_insured_institutions"] = total
+            else:
+                logger.debug(f"FDIC institutions -> {r.status_code}")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"FDIC institutions fetch failed: {e}")
+
+        # Most recent bank failures (year-to-date signal).
         try:
             r = await client.get(
                 "https://banks.data.fdic.gov/api/failures",
                 params={
-                    "fields": "NAME,CITYST,FAILDATE,COST,RESTYPE",
+                    "fields": "NAME,PSTALP,FAILDATE,COST,RESTYPE",
                     "sort_by": "FAILDATE",
                     "sort_order": "DESC",
                     "limit": "3",
@@ -126,15 +157,64 @@ class FinanceIntel:
                 },
             )
             if r.status_code == 200:
-                return [d.get("data", d) for d in r.json().get("data", [])]
+                rows = (r.json() or {}).get("data", []) or []
+                failures = [(row.get("data") if isinstance(row.get("data"), dict) else row) for row in rows]
+                out["recent_bank_failures"] = failures
+            else:
+                logger.debug(f"FDIC failures -> {r.status_code}")
         except Exception as e:  # noqa: BLE001
             logger.debug(f"FDIC failures fetch failed: {e}")
-        return []
+
+        return out
+
+    async def _bea(self, client: httpx.AsyncClient) -> Dict:
+        """U.S. Bureau of Economic Analysis (BEA) — real GDP growth. Needs BEA_API_KEY."""
+        if not settings.bea_api_key:
+            return {}
+        try:
+            years = ",".join(str(datetime.utcnow().year - i) for i in range(0, 2))
+            r = await client.get(
+                "https://apps.bea.gov/api/data",
+                params={
+                    "UserID": settings.bea_api_key,
+                    "method": "GetData",
+                    "datasetname": "NIPA",
+                    "TableName": "T10101",  # percent change from preceding period, real GDP
+                    "Frequency": "Q",
+                    "Year": years,
+                    "ResultFormat": "JSON",
+                },
+            )
+            if r.status_code != 200:
+                logger.debug(f"BEA -> {r.status_code}")
+                return {}
+            results = ((r.json() or {}).get("BEAAPI") or {}).get("Results") or {}
+            rows = results.get("Data") if isinstance(results, dict) else None
+            if not rows and isinstance(results, list) and results:
+                rows = results[0].get("Data")
+            if not rows:
+                return {}
+            # Line 1 = Gross domestic product; take the latest quarter present.
+            gdp_rows = [d for d in rows if str(d.get("LineNumber")) == "1"]
+            if not gdp_rows:
+                return {}
+            latest = sorted(gdp_rows, key=lambda d: str(d.get("TimePeriod")))[-1]
+            return {
+                "real_gdp_growth": {
+                    "period": latest.get("TimePeriod"),
+                    "pct_change_annualized": latest.get("DataValue"),
+                    "measure": latest.get("LineDescription") or "Real GDP, % change (annualized)",
+                }
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"BEA fetch failed: {e}")
+            return {}
 
     async def gather_data(self) -> Dict:
         """Collect all verified figures into one structured payload."""
         data: Dict = {"as_of": datetime.utcnow().isoformat() + "Z", "sources": {}}
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            # FRED — core macro (rates, inflation, jobs, mortgages)
             fred: Dict = {}
             for series_id, label, unit in _FRED_SERIES:
                 obs = await self._fred_series(client, series_id)
@@ -142,31 +222,64 @@ class FinanceIntel:
                     fred[series_id] = {"label": label, "unit": unit, **obs}
             if fred:
                 data["sources"]["FRED (Federal Reserve, St. Louis)"] = fred
+
+            # Moody's — corporate bond yields / credit spreads (via FRED redistribution)
+            moodys: Dict = {}
+            for series_id, label, unit in _MOODYS_SERIES:
+                obs = await self._fred_series(client, series_id)
+                if obs:
+                    moodys[series_id] = {"label": label, "unit": unit, **obs}
+            if moodys:
+                data["sources"]["Moody's (corporate bond yields)"] = moodys
+
+            # BEA — output/growth
+            bea = await self._bea(client)
+            if bea:
+                data["sources"]["U.S. Bureau of Economic Analysis (BEA)"] = bea
+
+            # U.S. Treasury — fiscal
             treasury = await self._treasury(client)
             if treasury:
                 data["sources"]["U.S. Treasury (Fiscal Data)"] = treasury
-            fdic = await self._fdic_failures(client)
+
+            # FDIC — banking health
+            fdic = await self._fdic(client)
             if fdic:
-                data["sources"]["FDIC"] = {"recent_bank_failures": fdic}
+                data["sources"]["FDIC"] = fdic
         return data
 
     # ---------------------------------------------------------------- synthesis
     def _system_prompt(self) -> str:
         return (
-            "You are ORELIUS, delivering the Master's daily U.S. financial "
-            "intelligence briefing. You will be given ONLY verified figures pulled "
-            "live from official government sources (Federal Reserve/FRED, U.S. "
-            "Treasury, FDIC). Rules, without exception:\n"
-            "1. Use ONLY the numbers provided below. Never invent, estimate, or add "
-            "any figure that is not in the data.\n"
-            "2. For every number you cite, name its source (FRED, U.S. Treasury, or "
+            "You are ORELIUS, delivering the Master's daily U.S. economic "
+            "intelligence briefing, focused through the lens of the LIFE INSURANCE "
+            "industry. You are given ONLY verified figures pulled live from official "
+            "sources: Federal Reserve/FRED, Moody's (corporate bond yields), U.S. "
+            "Bureau of Economic Analysis (BEA), U.S. Treasury, and FDIC.\n\n"
+            "HARD RULES (never break):\n"
+            "1. Use ONLY the numbers provided in the data below. Never invent, "
+            "estimate, or add any figure not present.\n"
+            "2. For every number, name its source (FRED, Moody's, BEA, Treasury, or "
             "FDIC) and its date.\n"
-            "3. Where a prior value is given, note the change (up/down) plainly.\n"
-            "4. If the data is thin, say so — do not pad with speculation.\n"
-            "5. Be concise and factual: a short 'Key Rates' section, a 'Fiscal & "
-            "Banking' section, and a 2-3 sentence 'What it means' read-out that only "
-            "interprets the given numbers.\n"
-            "Address the reader as 'Master'."
+            "3. Where a prior value is given, state the change (up/down) plainly.\n"
+            "4. If a source is missing, say so — never fabricate to fill a gap.\n\n"
+            "YOUR JOB — gather, then compress into a cohesive understanding. Structure:\n"
+            "• **Economy Snapshot** — the key verified figures (rates, credit spreads, "
+            "growth, jobs, inflation, fiscal, banking), each sourced and dated.\n"
+            "• **Life-Insurance Read** — stack that economy against the U.S. life "
+            "insurance business: how these exact numbers affect insurers' investment "
+            "income and bond portfolios (Moody's Aaa/Baa yields and spreads, 10-Yr "
+            "Treasury), product pricing and crediting rates, annuity/IUL demand, "
+            "credit and reinvestment risk, and capital. Tie each point to a figure "
+            "above. Factor in standing U.S. tax treatment where relevant (IRS rules "
+            "you already know — e.g. §7702 definition of life insurance and tax-"
+            "deferred inside build-up, §1035 exchanges, §7702B for LTC riders, the "
+            "§7520 valuation rate). Label these clearly as standing tax rules, not "
+            "live figures.\n"
+            "• **Cohesive Summary** — 2-4 tight sentences condensing everything into "
+            "one clear read for the Master: what today's data means for the life "
+            "insurance opportunity, stated plainly.\n\n"
+            "Be disciplined and concise. Address the reader as 'Master'."
         )
 
     async def generate_brief(self, db: AsyncSession) -> Dict:

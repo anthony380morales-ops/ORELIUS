@@ -63,8 +63,11 @@ class Settings(BaseSettings):
 
     # --- Daily Financial Intelligence automation ---
     # Free FRED API key (https://fred.stlouisfed.org/docs/api/api_key.html).
-    # Treasury Fiscal Data + FDIC need no key; FRED gives rates/CPI/unemployment.
+    # FRED also carries Moody's corporate bond yields. Treasury Fiscal Data +
+    # FDIC need no key.
     fred_api_key: str = ""
+    # Free BEA API key (https://apps.bea.gov/API/signup/) for GDP/output data.
+    bea_api_key: str = ""
 
     # Google Sheets
     google_sheets_credentials_file: str = "./google-credentials.json"
