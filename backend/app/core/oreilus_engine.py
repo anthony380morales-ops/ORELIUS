@@ -15,6 +15,7 @@ from .security import security_layer
 from .prompts import get_system_prompt
 from .token_optimizer import token_optimizer
 from .shared_memory import shared_memory
+from .persona_profile import persona_profile
 from . import athena
 from ..models.conversation import MessageRole, MessageSource
 from ..models.audit_log import AuditEventType, AuditSeverity
@@ -51,6 +52,7 @@ class OreilusEngine:
         self.security = security_layer
         self.optimizer = token_optimizer
         self.shared = shared_memory
+        self.persona = persona_profile
 
     async def process_message(
         self,
@@ -103,14 +105,22 @@ class OreilusEngine:
 
             # Pull the latest shared LUCIUS/ORELIUS memory to inject into the persona
             shared_context = await self.shared.build_context(db)
+            # Pull ORELIUS's learned read of the Master's personality (chat only).
+            persona_context = await self.persona.render_context(db)
 
             logger.info(f"Generating response for user {user_id} (conversation {conversation.id})")
 
             if stream and not attachments:
-                return self._stream_response(db, conversation.id, history, user_message, shared_context)
-            return await self._complete_response(
-                db, conversation.id, history, user_message, shared_context, attachments
+                return self._stream_response(
+                    db, conversation.id, history, user_message, shared_context, persona_context
+                )
+            reply = await self._complete_response(
+                db, conversation.id, history, user_message, shared_context, attachments, persona_context
             )
+            # Learn the Master's personality from this exchange (cheap, throttled,
+            # and strictly conversational — never touches the finance automation).
+            await self.persona.observe(db, history, user_message, reply)
+            return reply
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
@@ -134,9 +144,10 @@ class OreilusEngine:
         user_message: str,
         shared_context: str = "",
         attachments: list[dict] | None = None,
+        persona_context: str = "",
     ) -> str:
         """Generate complete response (non-streaming) with response-cache short-circuit."""
-        system = self.system_prompt + shared_context
+        system = self.system_prompt + shared_context + persona_context
 
         # 0) Attachments (photos / files): vision path. No cache, no tools — the
         #    Master sent media to look at, so answer directly with the image/file.
@@ -332,9 +343,10 @@ class OreilusEngine:
         history: list[dict],
         user_message: str,
         shared_context: str = "",
+        persona_context: str = "",
     ) -> AsyncGenerator[str, None]:
         """Generate streaming response."""
-        system = self.system_prompt + shared_context
+        system = self.system_prompt + shared_context + persona_context
         full_response = ""
 
         async for chunk in await self.claude.chat(
@@ -350,6 +362,8 @@ class OreilusEngine:
         self.optimizer.store_response(self.optimizer.cache_key(system, history), full_response)
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, full_response)
         await self._record_shared_memory(db, user_message, full_response)
+        # Learn the Master's personality from this exchange (chat only).
+        await self.persona.observe(db, history, user_message, full_response)
 
     async def _record_shared_memory(self, db: AsyncSession, user_message: str, response: str) -> None:
         """Write a compact exchange summary to the LUCIUS/ORELIUS shared log."""

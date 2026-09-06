@@ -14,6 +14,7 @@ from .message_metrics import MessageMetrics
 from .security_challenges import SecurityChallenge
 from .dynamic_keywords import DynamicKeyword
 from .shared_memory import SharedMemoryEvent
+from .persona_profile import PersonaProfile
 
 __all__ = [
     "Conversation",
@@ -35,4 +36,5 @@ __all__ = [
     "SecurityChallenge",
     "DynamicKeyword",
     "SharedMemoryEvent",
+    "PersonaProfile",
 ]

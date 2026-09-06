@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     # publishes nothing — never use it as the default for publish requests.
     athena_default_action: str = "once"
 
+    # --- Personality learning (the "normal AI chatbot" side) ---
+    # ORELIUS learns the Master's communication style over conversations and
+    # tailors replies to it. This ONLY affects chat — never the finance engine.
+    persona_learning_enabled: bool = True
+    persona_update_every: int = 6          # refresh the profile every N exchanges
+    persona_reflect_max_tokens: int = 700  # tight cap for the cheap reflection call
+    persona_context_char_cap: int = 1400   # cap the profile block injected into chat
+
     # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
     telegram_bot_token: str = ""
     telegram_allowed_users: str = ""  # Comma-separated user IDs allowed to log in
