@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_db
 from ...core.finance_intel import finance_intel
+from ...core.nxg_intel import nxg_intel
 from ...config import settings
 from ...utils.logger import logger
 
@@ -65,6 +66,47 @@ async def latest_finance_brief(
     ).scalars().first()
     if not row:
         return {"ok": False, "summary": "No financial briefing has been generated yet."}
+    return {
+        "ok": True,
+        "title": row.title,
+        "summary": row.summary,
+        "report_date": row.report_date.isoformat() if row.report_date else None,
+        "data": row.content,
+    }
+
+
+@router.post("/automation/nxg-brief")
+async def run_nxg_brief(
+    db: AsyncSession = Depends(get_db),
+    x_shared_secret: Optional[str] = Header(default=None, alias="X-Shared-Secret"),
+):
+    """Run the daily NXG Life Group funnel briefing now (leads + site traffic)."""
+    _require_secret(x_shared_secret)
+    logger.info("Running daily NXG funnel briefing...")
+    result = await nxg_intel.generate_brief(db)
+    logger.info(f"NXG brief complete (ok={result.get('ok')})")
+    return result
+
+
+@router.get("/automation/nxg-brief/latest")
+async def latest_nxg_brief(
+    db: AsyncSession = Depends(get_db),
+    x_shared_secret: Optional[str] = Header(default=None, alias="X-Shared-Secret"),
+):
+    """Return the most recent stored NXG funnel briefing."""
+    _require_secret(x_shared_secret)
+    from ...models.report import Report, ReportType
+
+    row = (
+        await db.execute(
+            select(Report)
+            .where(Report.report_type == ReportType.BUSINESS_EXPANSION)
+            .order_by(Report.created_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+    if not row:
+        return {"ok": False, "summary": "No NXG funnel briefing has been generated yet."}
     return {
         "ok": True,
         "title": row.title,

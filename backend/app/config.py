@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     # Daily intel: never retrieve data older than this many days (the 2-month barrier).
     finance_lookback_days: int = 60
 
+    # --- NXG Life Group funnel intelligence (leads + site traffic) ---
+    # ORELIUS reads the LifeFunnel site's Supabase project (the same DB the admin
+    # dashboard reads) for leads, and a page_views table for visitor/device counts.
+    # This is a SEPARATE daily automation from the finance engine.
+    nxg_supabase_url: str = "https://bhuclkecnnbsovbdplwe.supabase.co"
+    nxg_supabase_service_key: str = ""   # Supabase service_role key (set in Render env; secret)
+    nxg_site_url: str = "https://nxglifegroup.com"
+    # Optional Netlify Analytics fallback for traffic (paid add-on; best-effort).
+    netlify_api_token: str = ""
+    netlify_site_id: str = ""
+
     # Google Sheets
     google_sheets_credentials_file: str = "./google-credentials.json"
     google_sheet_id_trends: str = ""
