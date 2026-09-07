@@ -110,48 +110,64 @@ class ClaudeClient:
         where sources is a list of {title, url} the model actually pulled — so the
         brief is grounded in real, cited outlets and never fabricated.
         """
-        tool: Dict = {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses}
-        if allowed_domains:
-            tool["allowed_domains"] = list(allowed_domains)[:64]
+        async def _run(domains: Optional[List[str]]) -> tuple[str, List[Dict[str, str]]]:
+            tool: Dict = {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses}
+            if domains:
+                tool["allowed_domains"] = list(domains)[:64]
 
-        messages: List[Dict] = [{"role": "user", "content": user_text}]
-        sources: List[Dict[str, str]] = []
-        seen_urls: set[str] = set()
-        answer = ""
+            messages: List[Dict] = [{"role": "user", "content": user_text}]
+            sources: List[Dict[str, str]] = []
+            seen_urls: set[str] = set()
+            answer = ""
 
-        for _ in range(5):  # bounded pause_turn continuation
-            resp = await self.client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens or settings.oreilus_report_max_tokens,
-                temperature=self.temperature,
-                system=self._build_system(system_prompt),
-                messages=messages,
-                tools=[tool],
-            )
-            self._record_usage(resp.usage)
+            for _ in range(5):  # bounded pause_turn continuation
+                resp = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=max_tokens or settings.oreilus_report_max_tokens,
+                    temperature=self.temperature,
+                    system=self._build_system(system_prompt),
+                    messages=messages,
+                    tools=[tool],
+                )
+                self._record_usage(resp.usage)
 
-            text_parts: List[str] = []
-            for block in getattr(resp, "content", []) or []:
-                btype = getattr(block, "type", None)
-                if btype == "text":
-                    text_parts.append(getattr(block, "text", "") or "")
-                elif btype == "web_search_tool_result":
-                    content = getattr(block, "content", None)
-                    # success -> list of results; error -> single object (skip)
-                    if isinstance(content, list):
-                        for r in content:
-                            url = getattr(r, "url", None)
-                            if url and url not in seen_urls:
-                                seen_urls.add(url)
-                                sources.append({"title": getattr(r, "title", "") or url, "url": url})
-            answer = "\n".join(p for p in text_parts if p).strip() or answer
+                text_parts: List[str] = []
+                for block in getattr(resp, "content", []) or []:
+                    btype = getattr(block, "type", None)
+                    if btype == "text":
+                        text_parts.append(getattr(block, "text", "") or "")
+                    elif btype == "web_search_tool_result":
+                        content = getattr(block, "content", None)
+                        # success -> list of results; error -> single object (skip)
+                        if isinstance(content, list):
+                            for r in content:
+                                url = getattr(r, "url", None)
+                                if url and url not in seen_urls:
+                                    seen_urls.add(url)
+                                    sources.append({"title": getattr(r, "title", "") or url, "url": url})
+                answer = "\n".join(p for p in text_parts if p).strip() or answer
 
-            if getattr(resp, "stop_reason", None) == "pause_turn":
-                messages.append({"role": "assistant", "content": resp.content})
-                continue
-            break
+                if getattr(resp, "stop_reason", None) == "pause_turn":
+                    messages.append({"role": "assistant", "content": resp.content})
+                    continue
+                break
 
-        return answer, sources
+            return answer, sources
+
+        # Primary attempt with the curated allowlist. If Anthropic rejects a domain
+        # (some reputable sites block its crawler → hard 400), self-heal by retrying
+        # once WITHOUT the filter so the brief never comes back empty. The system
+        # prompt still tells the model to prefer reputable/official outlets and cite.
+        try:
+            return await _run(allowed_domains)
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            domain_issue = "not accessible to our user agent" in msg or "allowed_domains" in msg \
+                or "domains are not accessible" in msg
+            if allowed_domains and domain_issue:
+                logger.warning("web search: some allowed_domains not crawlable — retrying unrestricted")
+                return await _run(None)
+            raise
 
     async def _stream_chat(
         self,

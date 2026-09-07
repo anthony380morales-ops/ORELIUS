@@ -84,11 +84,16 @@ class Settings(BaseSettings):
     # against life insurance/annuities/retirement — not just data-series numbers.
     web_search_enabled: bool = True
     web_search_max_uses: int = 5
-    # Reputable, verifiable sources the search is restricted to (never open web),
-    # keeping to the Master's "verified sources only" mandate.
+    # Reputable, verifiable sources the search is restricted to, keeping to the
+    # Master's "verified sources only" mandate. NOTE: these must be crawlable by
+    # Anthropic's search agent — paywalled sites that block the crawler (Reuters,
+    # AP, WSJ, FT, MarketWatch, Barron's) cause a hard 400 if included, so they are
+    # deliberately omitted. Official .gov feeds + CNBC/Bloomberg + ratings/insurance
+    # bodies are the accessible reputable set; the engine also falls back to an
+    # unrestricted (still reputable-instructed, cited) search if any domain is
+    # rejected, so the brief never comes back empty.
     finance_news_domains: list[str] = [
-        "reuters.com", "apnews.com", "wsj.com", "cnbc.com", "bloomberg.com",
-        "ft.com", "marketwatch.com", "barrons.com", "morningstar.com",
+        "cnbc.com", "bloomberg.com", "morningstar.com", "investopedia.com",
         "federalreserve.gov", "bls.gov", "treasury.gov", "bea.gov", "irs.gov",
         "sec.gov", "spglobal.com", "moodys.com", "limra.com", "iii.org", "naic.org",
     ]
