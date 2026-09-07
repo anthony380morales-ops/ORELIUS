@@ -16,6 +16,7 @@ from .prompts import get_system_prompt
 from .token_optimizer import token_optimizer
 from .shared_memory import shared_memory
 from .persona_profile import persona_profile
+from .nxg_intel import nxg_intel
 from . import athena
 from ..models.conversation import MessageRole, MessageSource
 from ..models.audit_log import AuditEventType, AuditSeverity
@@ -36,6 +37,19 @@ _ATHENA_INTENT = re.compile(
 def wants_athena(message: str) -> bool:
     """True if the message is a design/content request ORELIUS should hand to ATHENA."""
     return bool(_ATHENA_INTENT.search(message or ""))
+
+
+# When the Master asks about NXG leads/funnel, ORELIUS does a LIVE Supabase lookup
+# (never a stale reconstruction) and answers with name + critical savings point.
+_NXG_LEADS_INTENT = re.compile(
+    r"\bnxg\b|\bfunnel\b|\bpipeline\b|\bleads\b|\bprospects?\b|\bnew lead\b|\blife group\b",
+    re.IGNORECASE,
+)
+
+
+def wants_nxg_leads(message: str) -> bool:
+    """True if the Master is asking for NXG Life Group leads / funnel details."""
+    return bool(_NXG_LEADS_INTENT.search(message or ""))
 
 
 class OreilusEngine:
@@ -156,6 +170,13 @@ class OreilusEngine:
                 db, conversation_id, system, history, user_message, attachments
             )
 
+        # 0b) NXG leads/funnel question → LIVE Supabase lookup (never cached, never
+        #     reconstructed from memory), answered with name + critical savings point.
+        if wants_nxg_leads(user_message):
+            handled = await self._respond_with_nxg_leads(db, conversation_id, user_message)
+            if handled is not None:
+                return handled
+
         athena_request = settings.athena_enabled and wants_athena(user_message)
 
         # 1) Credit saver: identical repeat question? serve from cache for 0 credits.
@@ -262,6 +283,68 @@ class OreilusEngine:
         summary = user_message or f"reviewed attachment(s): {', '.join(names)[:200]}"
         await self._record_shared_memory(db, summary, response)
         return response
+
+    async def _respond_with_nxg_leads(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        user_message: str,
+    ) -> Optional[str]:
+        """Answer an NXG leads/funnel question with LIVE data (name + savings point).
+
+        Deterministic and credit-free: pulls the newest leads straight from Supabase
+        and formats exactly what the Master needs on a call, so nothing is stale or
+        fabricated. Returns None only if the lookup itself is misconfigured, letting
+        the normal chat path take over.
+        """
+        try:
+            result = await nxg_intel.recent_leads(db)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"NXG leads lookup failed, falling back to chat: {e}")
+            return None
+
+        if not result.get("ok"):
+            reason = result.get("reason")
+            if reason == "unconfigured":
+                return None  # not wired yet — let the normal brain reply explain
+            reply = ("Master, I could not reach the NXG lead store just now "
+                     "(the funnel database did not respond). Please try again in a moment.")
+            await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+            return reply
+
+        leads = result.get("leads") or []
+        reply = self._format_nxg_leads(leads, result.get("stages") or {})
+        await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+        await self._record_shared_memory(db, user_message, reply)
+        return reply
+
+    @staticmethod
+    def _format_nxg_leads(leads: list[dict], stages: dict) -> str:
+        """Phone-ready list: name + critical savings point, newest first."""
+        if not leads:
+            return ("Master, there are no leads in the NXG funnel yet. The moment one "
+                    "comes in, ask me and I'll have their name and savings point ready.")
+
+        new_count = sum(1 for l in leads if l.get("is_new"))
+        header = f"**NXG leads — {len(leads)} most recent"
+        header += f", {new_count} new in the last 24h:**" if new_count else ":**"
+        lines = [header, ""]
+        for i, l in enumerate(leads, 1):
+            tag = "  ·  🆕 NEW" if l.get("is_new") else ""
+            lines.append(f"{i}. **{l['name']}** — {l['concern']}{tag}")
+
+        # A light recommended next action, driven by the actual pipeline mix.
+        rec = None
+        if stages:
+            dominant = max(stages, key=stages.get)
+            if new_count:
+                rec = "Call the 🆕 new lead(s) first while intent is hot — open on their savings point above."
+            elif dominant in ("contacted", "call_intent", "new_lead", "new"):
+                rec = ("These are sitting in early pipeline. Line up follow-up calls to move them toward "
+                       "booked — lead with the savings point each one came in for.")
+        if rec:
+            lines += ["", f"**Recommended:** {rec}"]
+        return "\n".join(lines)
 
     async def _respond_with_athena(
         self,

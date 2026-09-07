@@ -47,9 +47,31 @@ _STATE_KEY = "nxg_state"
 
 # Columns pulled for a full lead detail line (the private dashboard's fields).
 _LEAD_DETAIL_COLS = (
-    "id,created_at,first_name,last_name,email,phone,primary_concern_label,"
+    "id,created_at,first_name,last_name,email,phone,primary_concern,primary_concern_label,"
     "pipeline_stage,call_status,call_outcome,tags"
 )
+
+# Speakable version of each quiz "primary concern" — the lead's critical savings
+# point. Mirrors the labels the funnel itself uses (trigger-retell-call.mjs), so
+# ORELIUS can fill one in even when the stored label is blank.
+_CONCERN_LABELS = {
+    "taxes": "being tax-smart with your money",
+    "retirement_income": "reliable retirement income",
+    "protect_family": "protecting your family",
+    "grow_safely": "growing your money safely",
+    "legacy": "leaving a legacy for your loved ones",
+}
+
+
+def _concern_of(row: Dict) -> str:
+    """The lead's critical savings point, plain-English, with sensible fallbacks."""
+    label = (row.get("primary_concern_label") or "").strip()
+    if label:
+        return label
+    code = (row.get("primary_concern") or "").strip()
+    if code:
+        return _CONCERN_LABELS.get(code, code.replace("_", " "))
+    return "not specified in the quiz"
 
 
 def _iso(dt: datetime) -> str:
@@ -136,6 +158,42 @@ class NXGIntel:
         out["pipeline"] = pipeline
         out["today"] = today
         return out
+
+    # ------------------------------------------------- on-demand live lookup
+    async def recent_leads(self, db: AsyncSession, limit: int = 15) -> Dict:
+        """Live Supabase lookup for the chat command 'give me the new leads'.
+
+        Returns the newest leads with just what the Master needs on a call — the
+        name and their critical savings point (quiz concern) — plus a recency flag
+        so brand-new leads stand out. Queried live every time, so a lead that just
+        came in shows immediately (no stale automation cache).
+        """
+        if not self._supa_ready():
+            return {"ok": False, "reason": "unconfigured"}
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            rows, err = await self._supa_select(
+                client, "leads",
+                f"select={_LEAD_DETAIL_COLS}&order=created_at.desc&limit={int(limit)}",
+            )
+        if rows is None:
+            return {"ok": False, "reason": err or "unavailable"}
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        leads: List[Dict] = []
+        stages: Dict[str, int] = {}
+        for r in rows:
+            name = " ".join(x for x in [r.get("first_name"), r.get("last_name")] if x) or "(no name given)"
+            created = self._parse_dt(r.get("created_at"))
+            stage = r.get("pipeline_stage") or "new"
+            stages[stage] = stages.get(stage, 0) + 1
+            leads.append({
+                "name": name,
+                "concern": _concern_of(r),
+                "stage": stage,
+                "created_at": r.get("created_at"),
+                "is_new": bool(created and created >= cutoff),
+            })
+        return {"ok": True, "leads": leads, "stages": stages}
 
     # --------------------------------------------------------------- traffic
     async def _fetch_traffic(self, client: httpx.AsyncClient, since: datetime) -> Dict:
