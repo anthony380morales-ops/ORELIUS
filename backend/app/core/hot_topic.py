@@ -86,8 +86,30 @@ class HotTopicReels:
         except Exception as e:  # noqa: BLE001
             logger.debug(f"hot-topic save package failed: {e}")
 
+    @staticmethod
+    def _is_empty_brief(text: str) -> bool:
+        """True for the finance engine's 'no new data' message — no facts to compile."""
+        low = (text or "").lower()
+        return ("no newly-released" in low or "nothing to repeat" in low
+                or "could not retrieve live economic news" in low
+                or "no new verified" in low)
+
     async def _latest_intel(self, db: AsyncSession) -> str:
-        """The economic intelligence ORELIUS has compiled — latest stored brief, else live."""
+        """The economic intelligence to build reels from.
+
+        PREFER the LIVE, web-searched, cited briefing (the same rich source the chat
+        economic-news answer uses) — the stored automation report is the de-duped
+        numeric feed and is frequently a 'no new data' message with nothing to
+        compile. Fall back to a stored brief only if it has real content.
+        """
+        live = ""
+        try:
+            live = await finance_intel.live_briefing()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"hot-topic live intel failed: {e}")
+        if live and len(live.strip()) > 200 and not self._is_empty_brief(live):
+            return live
+
         try:
             from ..models.report import Report, ReportType
             row = (await db.execute(
@@ -96,15 +118,13 @@ class HotTopicReels:
                 .order_by(Report.created_at.desc())
                 .limit(1)
             )).scalars().first()
-            if row and row.summary and len(row.summary.strip()) > 120:
-                return row.summary
+            s = (row.summary or "").strip() if row else ""
+            if s and len(s) > 200 and not self._is_empty_brief(s):
+                return s
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"hot-topic latest intel read failed: {e}")
-        try:
-            return await finance_intel.live_briefing()
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"hot-topic live intel failed: {e}")
-            return ""
+            logger.debug(f"hot-topic stored intel read failed: {e}")
+
+        return live  # may be empty / an 'empty brief' — caller handles gracefully
 
     # ------------------------------------------------------------- STEP 1: compile
     async def compile_package(self, db: AsyncSession) -> Dict:
