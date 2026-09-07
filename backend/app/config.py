@@ -95,9 +95,9 @@ class Settings(BaseSettings):
     higgbot_name: str = "higgbot"
     # How many facts ORELIUS compiles into the post package.
     hot_topic_facts: int = 3
-    # If true, dispatch one solo reel PER fact; if false (default per the flow), one
-    # award-winning reel carrying the compiled package (3 facts + caption + idea).
-    hot_topic_solo_reels: bool = False
+    # If true, dispatch one solo reel PER fact (3 solo reels); if false, one reel
+    # carrying the whole package. Master's choice: 3 solo reels.
+    hot_topic_solo_reels: bool = True
 
     # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
     telegram_bot_token: str = ""
