@@ -73,20 +73,36 @@ def wants_finance_news(message: str) -> bool:
     return bool(_FINANCE_NEWS_INTENT.search(message or ""))
 
 
-# When the Master asks for the hot-topic reels, ORELIUS distills today's economic
-# intel into the top verified facts and dispatches solo viral reels to ATHENA.
-_HOT_TOPIC_INTENT = re.compile(
-    r"\bhot[\s-]?topic\b|hottest\s+(?:life\s*insurance\s+)?(?:topic|niche|post|reel)"
-    r"|(?:today'?s|daily)\s+(?:hot|viral|trending)\s+(?:topic|post|reel)"
-    r"|viral\s+(?:post|reel)s?\b|post\s+idea\s+to\s+athena"
-    r"|\breels?\b.{0,40}(fact|topic|life\s*insurance|athena|hot|viral)",
+# Two-step hot-topic flow.
+# STEP 2 (dispatch) — hand the compiled package to ATHENA -> higgbot to generate the
+# reel and publish. Checked FIRST because it's the more specific command.
+_DISPATCH_REEL_INTENT = re.compile(
+    r"higg?bot"
+    r"|(?:have|tell|get)\s+athena.{0,40}(?:reel|publish|generate|post|higg?bot|design)"
+    r"|(?:send|give|hand|pass)\s+.{0,25}(?:to\s+)?(?:athena|higg?bot)"
+    r"|(?:generate|create|make|publish)\s+.{0,15}reel",
+    re.IGNORECASE,
+)
+# STEP 1 (compile) — compile the 3 hottest facts + caption + hashtags + post idea.
+_COMPILE_POST_INTENT = re.compile(
+    r"\bhot[\s-]?topic\b"
+    r"|compile.{0,25}(?:facts|data|post|hottest|briefing)"
+    r"|(?:3|three)\s+(?:best|hottest|important|top)\s+(?:facts|data|points)"
+    r"|construct.{0,15}(?:caption|post)|post\s+caption|viral\s+hashtags"
+    r"|compress.{0,25}(?:data|facts|into)"
+    r"|hottest\s+.{0,15}(?:facts|angle|topic|niche)|post\s+idea",
     re.IGNORECASE,
 )
 
 
-def wants_hot_topic_post(message: str) -> bool:
-    """True if the Master wants the daily hot-topic viral reels dispatched to ATHENA."""
-    return bool(_HOT_TOPIC_INTENT.search(message or ""))
+def wants_dispatch_reel(message: str) -> bool:
+    """True if the Master wants the compiled package sent to ATHENA -> higgbot."""
+    return bool(_DISPATCH_REEL_INTENT.search(message or ""))
+
+
+def wants_compile_post(message: str) -> bool:
+    """True if the Master wants ORELIUS to compile the hot-topic post package."""
+    return bool(_COMPILE_POST_INTENT.search(message or ""))
 
 
 class OreilusEngine:
@@ -207,11 +223,16 @@ class OreilusEngine:
                 db, conversation_id, system, history, user_message, attachments
             )
 
-        # 0a) Hot-topic reels → distill today's economic intel into the top verified
-        #     facts and dispatch solo viral reels to ATHENA (higgbot). Checked first,
-        #     since its phrasing ("post", "reel", "viral") overlaps other intents.
-        if settings.athena_enabled and wants_hot_topic_post(user_message):
-            handled = await self._respond_with_hot_topic_post(db, conversation_id, user_message)
+        # 0a) Hot-topic reel flow (two steps). Checked first — its phrasing ("post",
+        #     "reel", "athena", "hot topic") overlaps other intents.
+        #   Step 2: dispatch the compiled package to ATHENA -> higgbot (more specific).
+        if settings.athena_enabled and wants_dispatch_reel(user_message):
+            handled = await self._respond_dispatch_reel(db, conversation_id, user_message)
+            if handled is not None:
+                return handled
+        #   Step 1: compile the 3 hottest facts + caption + hashtags + reel idea.
+        if wants_compile_post(user_message):
+            handled = await self._respond_compile_post(db, conversation_id, user_message)
             if handled is not None:
                 return handled
 
@@ -398,56 +419,95 @@ class OreilusEngine:
             lines += ["", f"**Recommended:** {rec}"]
         return "\n".join(lines)
 
-    async def _respond_with_hot_topic_post(
+    async def _respond_compile_post(
         self,
         db: AsyncSession,
         conversation_id: int,
         user_message: str,
     ) -> Optional[str]:
-        """Distill today's economic intel into the top facts and dispatch solo reels."""
+        """STEP 1: compile the 3 hottest facts + caption + hashtags + reel idea, and hold it."""
         try:
-            result = await hot_topic_reels.build_and_dispatch(db)
+            result = await hot_topic_reels.compile_package(db)
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"hot-topic pipeline failed, using normal chat: {e}")
+            logger.warning(f"hot-topic compile failed, using normal chat: {e}")
             return None
 
         if not result.get("ok"):
-            reason = result.get("reason")
             msgs = {
-                "athena_disabled": ("Master, ATHENA delegation is currently disabled, so I "
-                                    "can't dispatch the reels. Enable ATHENA and I'll run it."),
                 "no_intel": ("Master, I have no compiled economic intelligence to draw from "
-                             "yet. Ask me for the economic news first, then I'll spin up the reels."),
-                "distill_failed": ("Master, I pulled the intelligence but couldn't distill the "
-                                   "reels this cycle. Try again shortly."),
+                             "yet. Ask me for the economic news first, then I'll compile the post."),
+                "compile_failed": ("Master, I pulled the intelligence but couldn't compile the "
+                                   "post this cycle. Try again shortly."),
             }
-            reply = msgs.get(reason, "Master, I couldn't build the reels this time.")
+            reply = msgs.get(result.get("reason"), "Master, I couldn't compile the post this time.")
             await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
             return reply
 
-        reply = self._format_hot_topic(result.get("reels") or [])
+        reply = self._format_compiled_package(result["package"])
+        await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+        await self._record_shared_memory(db, user_message, reply)
+        return reply
+
+    async def _respond_dispatch_reel(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        user_message: str,
+    ) -> Optional[str]:
+        """STEP 2: hand the held package to ATHENA -> higgbot to make + publish the reel."""
+        try:
+            result = await hot_topic_reels.dispatch(db)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"hot-topic dispatch failed, using normal chat: {e}")
+            return None
+
+        if not result.get("ok"):
+            msgs = {
+                "athena_disabled": ("Master, ATHENA delegation is currently disabled, so I can't "
+                                    "hand the reel to higgbot. Enable ATHENA and I'll run it."),
+                "no_intel": ("Master, there's no economic intelligence to build from yet. Ask me "
+                             "for the economic news, then to compile the post, then I'll dispatch it."),
+                "compile_failed": ("Master, I couldn't compile a post to dispatch this cycle. "
+                                   "Try again shortly."),
+                "no_package": ("Master, I have no compiled post to send. Ask me to compile the "
+                               "3 hottest facts into a post first, then I'll dispatch it."),
+            }
+            reply = msgs.get(result.get("reason"), "Master, I couldn't dispatch the reel this time.")
+            await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+            return reply
+
+        higg = getattr(settings, "higgbot_name", "higgbot")
+        n = result.get("dispatched", 1)
+        what = f"{n} solo reels" if n > 1 else "the reel"
+        reply = (
+            f"Understood, Master — I've handed the package to ATHENA to give {higg} for "
+            f"{what}. {higg} will generate an award-winning reel for the ibluezcluezflow "
+            f"pages and ATHENA will publish it per the ibluezcluezflow content roadmap she "
+            f"holds. I'll surface her result — and whether it cleared her quality gate — "
+            f"here through our shared memory as it lands."
+        )
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
         await self._record_shared_memory(db, user_message, reply)
         return reply
 
     @staticmethod
-    def _format_hot_topic(reels: list[dict]) -> str:
-        if not reels:
-            return "Master, I couldn't build the reels this time."
-        lines = [
-            f"**Understood, Master — {len(reels)} solo reels dispatched to ATHENA.**",
-            "",
-            "From today's compiled economic intelligence, the hottest life-insurance angles:",
-        ]
-        for i, r in enumerate(reels, 1):
-            src = f" ({r.get('source')})" if r.get("source") else ""
-            lines.append(f"{i}. **{r.get('topic','')}** — {r.get('fact','')}{src}")
+    def _format_compiled_package(pkg: dict) -> str:
+        facts = pkg.get("facts") or []
+        lines = ["**Here's your ibluezcluezflow post package, Master** — compiled from today's "
+                 "financial intelligence.", "", "**The 3 hottest facts (plain language):**"]
+        for i, f in enumerate(facts, 1):
+            lines.append(f"{i}. {f}")
         lines += [
             "",
-            "ATHENA will produce each as an award-winning viral reel via the higgbot "
-            "(Higgsfield) engine, follow the ibluezcluezflow content guidelines, and publish "
-            "to the correct accounts. I'll surface each result — and whether it cleared her "
-            "quality gate — here through our shared memory as it lands.",
+            f"**Caption:**\n{pkg.get('caption','')}",
+            "",
+            f"**Viral hashtags:**\n{pkg.get('hashtags','')}",
+            "",
+            f"**Reel / post idea:**\n{pkg.get('post_idea','')}",
+            "",
+            "Say the word — *\"have ATHENA give it to higgbot and publish\"* — and I'll hand "
+            "this to ATHENA for higgbot to generate the award-winning reel and publish per the "
+            "ibluezcluezflow content roadmap.",
         ]
         return "\n".join(lines)
 

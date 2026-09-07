@@ -70,30 +70,34 @@ class Settings(BaseSettings):
     # older messages auto-expire (a fresh holding period rolls forward).
     chat_retention_days: int = 7
 
-    # --- Hot-topic post pipeline (economic intel -> ATHENA viral post) ---
-    # ORELIUS distills today's compiled economic intelligence into the single hottest
-    # life-insurance topic and dispatches a ready-to-run viral post brief to ATHENA.
-    # These guidelines are injected into the ATHENA brief so posts stay on-brand.
-    # Override IBLUEZCLUEZFLOW_GUIDELINES in the environment with the real brand
-    # guidelines when available; this default matches the financial-education ethos.
+    # --- Hot-topic reel pipeline (economic intel -> post package -> ATHENA/higgbot) ---
+    # Two conversational steps: (1) ORELIUS compiles the 3 best/hottest VERIFIED facts
+    # from the financial-intelligence briefing, compresses them into plain language for
+    # the hottest life-insurance angle, and builds a post caption + viral hashtags + a
+    # reel idea; (2) on the Master's word, ORELIUS hands that package to ATHENA, who
+    # gives it to higgbot (the Master's own custom design agent — NOT Higgsfield) to
+    # generate an award-winning reel and publish per the ibluezcluezflow content roadmap
+    # ATHENA holds in her files.
+    #
+    # These brand notes only steer ORELIUS's caption/hashtag drafting; the reel format,
+    # style, and account routing follow ATHENA's stored ibluezcluezflow content roadmap.
     ibluezcluezflow_guidelines: str = (
         "Brand: ibluezcluezflow — financial education that decodes money, banking, and "
         "life insurance for everyday people.\n"
         "Voice: simple, confident, bold, high-trust; plain language, zero jargon; never "
         "hype; compliance-conscious — education, NOT individualized financial advice; "
         "never promise returns or invent figures.\n"
-        "Look: clean, modern, high-contrast, bold typography; a scroll-stopping first "
-        "frame; premium but approachable.\n"
-        "Post structure: strong hook -> ONE clear insight (the fact) -> why it matters to "
-        "YOU -> simple takeaway -> soft CTA (follow / DM 'BLUEPRINT' / learn more).\n"
-        "Always tie the fact to a life-insurance / Infinite Banking / protect-and-grow "
-        "angle. Use 3-6 relevant hashtags. No guarantees, no specific returns, no "
-        "unverified numbers, no generic finance filler."
+        "Caption shape: strong hook -> the insight(s) -> why it matters to YOU -> soft "
+        "CTA (follow / DM / learn more). Tie to life insurance / Infinite Banking / "
+        "protect-and-grow. Viral, relevant hashtags."
     )
-    # Which accounts ATHENA should publish to (ATHENA resolves the actual handles).
-    ibluezcluezflow_accounts: str = "the ibluezcluezflow social media accounts"
-    # How many solo reels to generate — one verified fact per reel.
-    hot_topic_reels: int = 3
+    # ATHENA's custom design agent that renders the reel (the Master's own — not Higgsfield).
+    higgbot_name: str = "higgbot"
+    # How many facts ORELIUS compiles into the post package.
+    hot_topic_facts: int = 3
+    # If true, dispatch one solo reel PER fact; if false (default per the flow), one
+    # award-winning reel carrying the compiled package (3 facts + caption + idea).
+    hot_topic_solo_reels: bool = False
 
     # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
     telegram_bot_token: str = ""

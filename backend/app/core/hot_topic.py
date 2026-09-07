@@ -1,19 +1,23 @@
 """
-Hot-topic reel pipeline — economic intel -> ATHENA viral reels.
+Hot-topic reel pipeline — a two-step, Master-driven flow.
 
-ORELIUS takes the economic intelligence it has already compiled, pulls the THREE
-most important verified facts, frames each as the hottest topic for the life-
-insurance niche today, and dispatches THREE solo Instagram reels to ATHENA — one
-verified fact per reel. Each reel brief tells ATHENA to use the higgbot
-(Higgsfield) engine to produce an award-winning, viral video and publish it to the
-correct ibluezcluezflow accounts, following the brand content guidelines.
+STEP 1 (compile): from the financial-intelligence briefing ORELIUS already
+compiled, he pulls the 3 best & hottest VERIFIED facts, compresses each into plain
+language for the hottest life-insurance-niche angle, then constructs a post caption
+with viral hashtags and a reel idea. He SHOWS the package to the Master and holds it.
 
-Verified-source discipline holds: every fact comes from the compiled economic
-briefing (which is itself cited/official). ORELIUS never invents a figure.
+STEP 2 (dispatch): on the Master's word, ORELIUS hands that package to ATHENA, who
+gives the details to higgbot — the Master's OWN custom design agent (not Higgsfield)
+— to generate an award-winning reel for the ibluezcluezflow pages and publish per
+the ibluezcluezflow content roadmap ATHENA holds in her files.
+
+Verified-source discipline holds: every fact comes from the cited economic briefing;
+ORELIUS never invents a figure.
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import select
@@ -23,129 +27,178 @@ from ..config import settings
 from ..utils.logger import logger
 from .claude_client import claude_client
 from .finance_intel import finance_intel
+from ..models.automation_state import AutomationState  # noqa: F401 (register table)
 from . import athena
 
+_STATE_KEY = "hot_topic_package"
 
-def _distill_system(n: int) -> str:
+
+def _compile_system(n: int) -> str:
     return (
         f"You are ORELIUS's viral content strategist for the life-insurance brand "
-        f"ibluezcluezflow. From the economic intelligence provided, pick the {n} MOST "
-        f"important, most timely, DISTINCT verified facts, and turn each into the hottest, "
-        f"most engaging topic for the life-insurance niche today. For each, design a "
-        f"scroll-stopping solo Instagram REEL concept that follows the brand guidelines.\n\n"
+        f"ibluezcluezflow. From the compiled economic intelligence provided, pick the "
+        f"{n} BEST and HOTTEST distinct VERIFIED facts, and compress each into ONE "
+        f"plain-language line framed for the hottest life-insurance-niche angle. Then "
+        f"construct a single scroll-stopping post CAPTION, a set of VIRAL HASHTAGS, and "
+        f"one strong REEL/POST IDEA that ties the facts together.\n\n"
         "HARD RULES:\n"
-        "1. Use ONLY facts present in the intelligence provided — cite the figure and its "
-        "source. Never invent a number, a development, or a source.\n"
-        "2. Each reel centers on ONE fact and ONE clear life-insurance / Infinite Banking / "
-        "protect-and-grow angle.\n"
-        "3. Education, not individualized advice; no promises of returns; plain, bold, "
-        "high-trust language.\n\n"
-        "BRAND CONTENT GUIDELINES (follow exactly):\n"
+        "1. Use ONLY facts present in the intelligence provided — never invent a number, "
+        "a development, or a source. Keep each fact plain and punchy.\n"
+        "2. Education, not individualized advice; no promises of returns.\n"
+        "3. Tie everything to a life-insurance / Infinite Banking / protect-and-grow "
+        "angle, in the brand voice.\n\n"
+        "BRAND VOICE (guide the caption + hashtags):\n"
         f"{settings.ibluezcluezflow_guidelines}\n\n"
-        f"Return ONLY a JSON object: {{\"reels\": [ ... {n} objects ... ]}} where each object "
-        "has keys: \"topic\" (the one-line hot topic), \"fact\" (the single verified fact "
-        "in plain words), \"source\" (outlet/agency), \"hook\" (the first 1-2 seconds line), "
-        "\"angle\" (the life-insurance tie-in), \"reel_concept\" (what the video shows, "
-        "shot by shot, scroll-stopping), \"caption\" (caption direction + key points), "
-        "\"hashtags\" (3-6, space-separated), \"cta\" (soft call to action). Output JSON only."
+        f"Return ONLY a JSON object: {{\"facts\": [ {n} plain-language strings ], "
+        "\"caption\": \"the full post caption\", \"hashtags\": \"space-separated viral "
+        "hashtags\", \"post_idea\": \"the reel/post concept in 1-3 sentences\"}}. "
+        "Output JSON only."
     )
 
 
 class HotTopicReels:
-    """Distills the top facts and dispatches solo reels to ATHENA."""
+    """Compiles the post package, then (on command) dispatches it to ATHENA/higgbot."""
+
+    # ------------------------------------------------------- compiled-package store
+    async def _load_package(self, db: AsyncSession) -> Dict:
+        try:
+            row = (await db.execute(
+                select(AutomationState).where(AutomationState.key == _STATE_KEY)
+            )).scalars().first()
+            if row and isinstance(row.data, dict):
+                return dict(row.data)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"hot-topic load package failed: {e}")
+        return {}
+
+    async def _save_package(self, db: AsyncSession, package: Dict) -> None:
+        try:
+            row = (await db.execute(
+                select(AutomationState).where(AutomationState.key == _STATE_KEY)
+            )).scalars().first()
+            if row:
+                row.data = package
+            else:
+                db.add(AutomationState(key=_STATE_KEY, data=package))
+            await db.flush()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"hot-topic save package failed: {e}")
 
     async def _latest_intel(self, db: AsyncSession) -> str:
         """The economic intelligence ORELIUS has compiled — latest stored brief, else live."""
         try:
             from ..models.report import Report, ReportType
-            row = (
-                await db.execute(
-                    select(Report)
-                    .where(Report.report_type == ReportType.BANKING_INTELLIGENCE)
-                    .order_by(Report.created_at.desc())
-                    .limit(1)
-                )
-            ).scalars().first()
+            row = (await db.execute(
+                select(Report)
+                .where(Report.report_type == ReportType.BANKING_INTELLIGENCE)
+                .order_by(Report.created_at.desc())
+                .limit(1)
+            )).scalars().first()
             if row and row.summary and len(row.summary.strip()) > 120:
                 return row.summary
         except Exception as e:  # noqa: BLE001
             logger.debug(f"hot-topic latest intel read failed: {e}")
-        # Fall back to a fresh live briefing (cited, current).
         try:
             return await finance_intel.live_briefing()
         except Exception as e:  # noqa: BLE001
             logger.warning(f"hot-topic live intel failed: {e}")
             return ""
 
-    async def _distill(self, intel: str, n: int) -> List[Dict]:
-        prompt = (
-            "Here is today's compiled economic intelligence. Extract the top facts and "
-            "design the reels per your rules:\n\n" + intel
-        )
-        try:
-            raw = await claude_client.chat(
-                messages=[{"role": "user", "content": prompt}],
-                system_prompt=_distill_system(n),
-                stream=False,
-                max_tokens=settings.oreilus_report_max_tokens,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"hot-topic distill failed: {e}")
-            return []
-        obj = self._parse_json(raw)
-        reels = (obj or {}).get("reels") if isinstance(obj, dict) else None
-        if isinstance(reels, list) and reels:
-            return [r for r in reels if isinstance(r, dict)][:n]
-        return []
-
-    def _reel_brief(self, concept: Dict, idx: int, total: int) -> str:
-        accounts = settings.ibluezcluezflow_accounts
-        return (
-            f"Create and PUBLISH an award-winning, VIRAL Instagram REEL (solo reel "
-            f"{idx} of {total}) for {accounts}, following the brand content guidelines "
-            f"below. Use the higgbot (Higgsfield) engine to generate the reel video to an "
-            f"award-winning, scroll-stopping, viral standard. This reel centers on ONE "
-            f"verified fact — do not combine it with the other reels.\n\n"
-            f"HOT TOPIC: {concept.get('topic','')}\n"
-            f"THE FACT (verified): {concept.get('fact','')} "
-            f"(source: {concept.get('source','')})\n"
-            f"HOOK (first 1-2s): {concept.get('hook','')}\n"
-            f"ANGLE (life-insurance tie-in): {concept.get('angle','')}\n"
-            f"REEL VISUAL CONCEPT: {concept.get('reel_concept','')}\n"
-            f"CAPTION DIRECTION: {concept.get('caption','')}\n"
-            f"HASHTAGS: {concept.get('hashtags','')}\n"
-            f"CTA: {concept.get('cta','')}\n\n"
-            f"BRAND CONTENT GUIDELINES (follow exactly):\n{settings.ibluezcluezflow_guidelines}\n\n"
-            f"Publish to the correct {accounts}."
-        )
-
-    async def build_and_dispatch(self, db: AsyncSession) -> Dict:
-        """Distill the top facts and dispatch one solo reel per fact to ATHENA."""
-        if not getattr(settings, "athena_enabled", True):
-            return {"ok": False, "reason": "athena_disabled"}
-
-        n = max(1, int(getattr(settings, "hot_topic_reels", 3)))
+    # ------------------------------------------------------------- STEP 1: compile
+    async def compile_package(self, db: AsyncSession) -> Dict:
+        """Compile the 3 hottest facts + caption + hashtags + reel idea, and hold it."""
+        n = max(1, int(getattr(settings, "hot_topic_facts", 3)))
         intel = await self._latest_intel(db)
         if not intel:
             return {"ok": False, "reason": "no_intel"}
 
-        concepts = await self._distill(intel, n)
-        if not concepts:
-            return {"ok": False, "reason": "distill_failed"}
-
-        dispatched: List[Dict] = []
-        for i, concept in enumerate(concepts, 1):
-            brief = self._reel_brief(concept, i, len(concepts))
-            await athena.enqueue_design_request(
-                db, request=brief, kind="instagram_post", action="once"
+        prompt = ("Here is today's compiled economic intelligence. Compile the package per "
+                  "your rules:\n\n" + intel)
+        try:
+            raw = await claude_client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=_compile_system(n),
+                stream=False,
+                max_tokens=settings.oreilus_report_max_tokens,
             )
-            dispatched.append({
-                "topic": concept.get("topic", ""),
-                "fact": concept.get("fact", ""),
-                "source": concept.get("source", ""),
-            })
-        logger.info(f"Hot-topic: dispatched {len(dispatched)} reels to ATHENA")
-        return {"ok": True, "reels": dispatched}
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"hot-topic compile failed: {e}")
+            return {"ok": False, "reason": "compile_failed"}
+
+        obj = self._parse_json(raw)
+        facts = (obj or {}).get("facts") if isinstance(obj, dict) else None
+        if not (isinstance(facts, list) and facts):
+            return {"ok": False, "reason": "compile_failed"}
+
+        package = {
+            "facts": [str(f) for f in facts][:n],
+            "caption": str((obj or {}).get("caption", "")).strip(),
+            "hashtags": str((obj or {}).get("hashtags", "")).strip(),
+            "post_idea": str((obj or {}).get("post_idea", "")).strip(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await self._save_package(db, package)
+        return {"ok": True, "package": package}
+
+    # ------------------------------------------------------------ STEP 2: dispatch
+    async def dispatch(self, db: AsyncSession) -> Dict:
+        """Hand the held package to ATHENA -> higgbot for reel generation + publish."""
+        if not getattr(settings, "athena_enabled", True):
+            return {"ok": False, "reason": "athena_disabled"}
+
+        stored = await self._load_package(db)
+        package = stored if stored.get("facts") else None
+        if package is None:
+            # Nothing compiled yet — compile on the fly so the dispatch still works.
+            res = await self.compile_package(db)
+            if not res.get("ok"):
+                return {"ok": False, "reason": res.get("reason", "no_package")}
+            package = res["package"]
+
+        solo = bool(getattr(settings, "hot_topic_solo_reels", False))
+        if solo:
+            count = 0
+            for i, fact in enumerate(package.get("facts") or [], 1):
+                await athena.enqueue_design_request(
+                    db, request=self._reel_brief(package, solo_fact=fact,
+                                                 idx=i, total=len(package["facts"])),
+                    kind="instagram_post", action="once",
+                )
+                count += 1
+            dispatched = count
+        else:
+            await athena.enqueue_design_request(
+                db, request=self._reel_brief(package), kind="instagram_post", action="once",
+            )
+            dispatched = 1
+
+        logger.info(f"Hot-topic: dispatched {dispatched} reel job(s) to ATHENA/higgbot")
+        return {"ok": True, "package": package, "dispatched": dispatched}
+
+    def _reel_brief(self, package: Dict, solo_fact: Optional[str] = None,
+                    idx: int = 1, total: int = 1) -> str:
+        higg = getattr(settings, "higgbot_name", "higgbot")
+        accounts = settings.ibluezcluezflow_accounts
+        facts = package.get("facts") or []
+        if solo_fact is not None:
+            facts_block = f"THE FACT (verified, plain language): {solo_fact}"
+            header = (f"Solo reel {idx} of {total} — this reel centers on ONE fact.")
+        else:
+            facts_block = "KEY FACTS (verified, plain language):\n" + "\n".join(
+                f"{i}. {f}" for i, f in enumerate(facts, 1)
+            )
+            header = "This reel carries the compiled package (all facts + caption)."
+        return (
+            f"Hand these details to {higg} — the Master's OWN custom design agent (NOT "
+            f"Higgsfield) — to generate an AWARD-WINNING Instagram REEL for {accounts}. "
+            f"{header} Execute publishing per the ibluezcluezflow CONTENT ROADMAP you hold "
+            f"in your files (format, style, and account routing come from that roadmap).\n\n"
+            f"POST CAPTION:\n{package.get('caption','')}\n\n"
+            f"VIRAL HASHTAGS:\n{package.get('hashtags','')}\n\n"
+            f"REEL / POST IDEA:\n{package.get('post_idea','')}\n\n"
+            f"{facts_block}\n\n"
+            f"Follow the ibluezcluezflow content roadmap in your files for everything else."
+        )
 
     @staticmethod
     def _parse_json(raw: str) -> Optional[Dict]:
