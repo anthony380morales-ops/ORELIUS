@@ -1,7 +1,7 @@
 """
 System status and health endpoints
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from ...database import get_db
@@ -172,6 +172,48 @@ async def daily_report(db: AsyncSession = Depends(get_db)):
         "memory": memory,
         "report_markdown": "\n".join(lines),
     }
+
+
+@router.get("/system/websearch-check")
+async def websearch_check(
+    x_shared_secret: str | None = Header(default=None, alias="X-Shared-Secret"),
+):
+    """Diagnostic: run one real web_search call and report exactly what happens.
+
+    Secured with the same shared secret as the automations. Returns the answer
+    preview + sources on success, or the precise exception on failure — so we can
+    see whether web search is reachable and what any error actually says.
+    """
+    from ...config import settings as _settings
+    from ...core.claude_client import claude_client
+    import anthropic as _anthropic
+
+    if not _settings.lucius_shared_secret or x_shared_secret != _settings.lucius_shared_secret:
+        return {"ok": False, "error": "unauthorized"}
+
+    out: dict = {
+        "sdk_version": getattr(_anthropic, "__version__", "unknown"),
+        "model": _settings.oreilus_model,
+        "web_search_enabled_flag": _settings.web_search_enabled,
+    }
+    try:
+        answer, sources = await claude_client.chat_with_web_search(
+            user_text="Search for the latest U.S. inflation or Federal Reserve news and give me one sentence.",
+            system_prompt="You are a concise assistant. Cite the source outlet.",
+            allowed_domains=list(_settings.finance_news_domains or []),
+            max_uses=2,
+            max_tokens=500,
+        )
+        out.update({
+            "ok": True,
+            "answer_present": bool(answer),
+            "answer_preview": (answer or "")[:400],
+            "sources_count": len(sources),
+            "sources_sample": sources[:3],
+        })
+    except Exception as e:  # noqa: BLE001
+        out.update({"ok": False, "error_type": type(e).__name__, "error": str(e)[:800]})
+    return out
 
 
 @router.get("/system/optimization")
