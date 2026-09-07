@@ -216,6 +216,52 @@ async def websearch_check(
     return out
 
 
+@router.get("/system/hot-topic-check")
+async def hot_topic_check(
+    db: AsyncSession = Depends(get_db),
+    x_shared_secret: str | None = Header(default=None, alias="X-Shared-Secret"),
+):
+    """Diagnostic: run the hot-topic compile and report exactly what happens.
+
+    Shows whether intel was found, the raw model output, and whether it parsed —
+    so we can pinpoint why 'compile the post' fails. Secret-gated.
+    """
+    from ...config import settings as _settings
+    from ...core.hot_topic import hot_topic_reels, _compile_system
+    from ...core.claude_client import claude_client
+
+    if not _settings.lucius_shared_secret or x_shared_secret != _settings.lucius_shared_secret:
+        return {"ok": False, "error": "unauthorized"}
+
+    out: dict = {}
+    try:
+        intel = await hot_topic_reels._latest_intel(db)
+        out["intel_len"] = len(intel or "")
+        out["intel_preview"] = (intel or "")[:200]
+        if not intel:
+            out["stage"] = "no_intel"
+            return out
+        raw = await claude_client.chat(
+            messages=[{"role": "user", "content":
+                       "Here is today's compiled economic intelligence. Compile the "
+                       "package per your rules:\n\n" + intel}],
+            system_prompt=_compile_system(int(getattr(_settings, "hot_topic_facts", 3))),
+            stream=False,
+            max_tokens=_settings.oreilus_report_max_tokens,
+            temperature=0.3,
+        )
+        out["raw_len"] = len(raw or "")
+        out["raw_preview"] = (raw or "")[:700]
+        obj = hot_topic_reels._parse_json(raw or "")
+        out["parsed_ok"] = isinstance(obj, dict)
+        out["parsed_keys"] = list(obj.keys()) if isinstance(obj, dict) else None
+        out["facts_count"] = len(obj.get("facts") or []) if isinstance(obj, dict) else 0
+    except Exception as e:  # noqa: BLE001
+        out["error_type"] = type(e).__name__
+        out["error"] = str(e)[:800]
+    return out
+
+
 @router.get("/system/optimization")
 async def get_optimization_stats():
     """
