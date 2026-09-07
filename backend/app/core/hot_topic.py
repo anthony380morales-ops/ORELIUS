@@ -49,12 +49,14 @@ def _compile_system(n: int) -> str:
         "angle, in the brand voice.\n\n"
         "BRAND VOICE (guide the caption + hashtags):\n"
         f"{settings.ibluezcluezflow_guidelines}\n\n"
-        f"Return ONLY a single-line JSON object: {{\"facts\": [ {n} plain-language "
-        "strings ], \"caption\": \"the full post caption\", \"hashtags\": \"space-"
-        "separated viral hashtags\", \"post_idea\": \"the reel/post concept in 1-3 "
-        "sentences\"}}. Do NOT wrap it in markdown or code fences, and do NOT add any "
-        "text before or after. Inside string values use \\n for any line breaks — never "
-        "a raw line break. Output the JSON object only."
+        f"Return ONLY a single-line JSON object with ALL FOUR keys present and non-empty: "
+        f"{{\"facts\": [ {n} plain-language strings ], \"caption\": \"the full post "
+        "caption\", \"hashtags\": \"6-10 space-separated viral hashtags, each starting "
+        "with #\", \"post_idea\": \"the reel/post concept in 1-3 sentences\"}}. The "
+        "hashtags MUST be their own field — never fold them into the caption. Do NOT wrap "
+        "the JSON in markdown or code fences, and do NOT add any text before or after. "
+        "Inside string values use \\n for any line breaks — never a raw line break. "
+        "Output the JSON object only."
     )
 
 
