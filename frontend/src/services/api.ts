@@ -106,6 +106,15 @@ export const chatApi = {
     return response.data
   },
 
+  // Persisted conversation for the authenticated user (last N days, held across
+  // app closes). Returns oldest→newest.
+  getHistory: async (): Promise<{ role: 'user' | 'assistant'; content: string }[]> => {
+    const response = await api.get('/chat/history')
+    return (response.data || []).filter(
+      (m: any) => m && (m.role === 'user' || m.role === 'assistant') && m.content,
+    )
+  },
+
   getConversations: async (userId: string): Promise<Conversation[]> => {
     const response = await api.get(`/conversations/${userId}`)
     return response.data

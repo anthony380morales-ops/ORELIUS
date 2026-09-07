@@ -55,19 +55,28 @@ export default function ChatConsole() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
-  // Daily "wake-up" status report — shown once per day on open.
+  // On open: (1) reload the held conversation (persists across app closes for the
+  // 7-day retention window), then (2) append the daily "wake-up" report once/day.
   useEffect(() => {
     let cancelled = false
-    const today = new Date().toISOString().slice(0, 10)
-    const last = localStorage.getItem('orelius:reportDate')
-    if (last === today) return
     ;(async () => {
+      // 1) Load the persisted conversation so it isn't wiped on reopen.
+      try {
+        const history = await chatApi.getHistory()
+        if (!cancelled && history.length) {
+          setMessages(history.map((m) => ({ role: m.role, content: m.content })))
+        }
+      } catch {
+        /* offline / waking — start empty */
+      }
+
+      // 2) Daily wake report — once per day, appended after the held conversation.
+      const today = new Date().toISOString().slice(0, 10)
+      if (localStorage.getItem('orelius:reportDate') === today) return
       try {
         const r = await systemApi.getDailyReport()
         if (cancelled || !r?.report_markdown) return
-        setMessages((prev) =>
-          prev.length ? prev : [{ role: 'assistant', content: r.report_markdown }],
-        )
+        setMessages((prev) => [...prev, { role: 'assistant', content: r.report_markdown }])
         localStorage.setItem('orelius:reportDate', today)
       } catch {
         /* offline / waking — silent */
