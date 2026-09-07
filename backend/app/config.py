@@ -65,6 +65,36 @@ class Settings(BaseSettings):
     persona_reflect_max_tokens: int = 700  # tight cap for the cheap reflection call
     persona_context_char_cap: int = 1400   # cap the profile block injected into chat
 
+    # --- Chat memory retention ---
+    # ORELIUS holds the conversation across app closes for this many days, then the
+    # older messages auto-expire (a fresh holding period rolls forward).
+    chat_retention_days: int = 7
+
+    # --- Hot-topic post pipeline (economic intel -> ATHENA viral post) ---
+    # ORELIUS distills today's compiled economic intelligence into the single hottest
+    # life-insurance topic and dispatches a ready-to-run viral post brief to ATHENA.
+    # These guidelines are injected into the ATHENA brief so posts stay on-brand.
+    # Override IBLUEZCLUEZFLOW_GUIDELINES in the environment with the real brand
+    # guidelines when available; this default matches the financial-education ethos.
+    ibluezcluezflow_guidelines: str = (
+        "Brand: ibluezcluezflow — financial education that decodes money, banking, and "
+        "life insurance for everyday people.\n"
+        "Voice: simple, confident, bold, high-trust; plain language, zero jargon; never "
+        "hype; compliance-conscious — education, NOT individualized financial advice; "
+        "never promise returns or invent figures.\n"
+        "Look: clean, modern, high-contrast, bold typography; a scroll-stopping first "
+        "frame; premium but approachable.\n"
+        "Post structure: strong hook -> ONE clear insight (the fact) -> why it matters to "
+        "YOU -> simple takeaway -> soft CTA (follow / DM 'BLUEPRINT' / learn more).\n"
+        "Always tie the fact to a life-insurance / Infinite Banking / protect-and-grow "
+        "angle. Use 3-6 relevant hashtags. No guarantees, no specific returns, no "
+        "unverified numbers, no generic finance filler."
+    )
+    # Which accounts ATHENA should publish to (ATHENA resolves the actual handles).
+    ibluezcluezflow_accounts: str = "the ibluezcluezflow social media accounts"
+    # How many solo reels to generate — one verified fact per reel.
+    hot_topic_reels: int = 3
+
     # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
     telegram_bot_token: str = ""
     telegram_allowed_users: str = ""  # Comma-separated user IDs allowed to log in

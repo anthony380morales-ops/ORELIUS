@@ -18,6 +18,7 @@ from .shared_memory import shared_memory
 from .persona_profile import persona_profile
 from .nxg_intel import nxg_intel
 from .finance_intel import finance_intel
+from .hot_topic import hot_topic_reels
 from . import athena
 from ..models.conversation import MessageRole, MessageSource
 from ..models.audit_log import AuditEventType, AuditSeverity
@@ -70,6 +71,22 @@ _FINANCE_NEWS_INTENT = re.compile(
 def wants_finance_news(message: str) -> bool:
     """True if the Master wants the live economic-intelligence briefing."""
     return bool(_FINANCE_NEWS_INTENT.search(message or ""))
+
+
+# When the Master asks for the hot-topic reels, ORELIUS distills today's economic
+# intel into the top verified facts and dispatches solo viral reels to ATHENA.
+_HOT_TOPIC_INTENT = re.compile(
+    r"\bhot[\s-]?topic\b|hottest\s+(?:life\s*insurance\s+)?(?:topic|niche|post|reel)"
+    r"|(?:today'?s|daily)\s+(?:hot|viral|trending)\s+(?:topic|post|reel)"
+    r"|viral\s+(?:post|reel)s?\b|post\s+idea\s+to\s+athena"
+    r"|\breels?\b.{0,40}(fact|topic|life\s*insurance|athena|hot|viral)",
+    re.IGNORECASE,
+)
+
+
+def wants_hot_topic_post(message: str) -> bool:
+    """True if the Master wants the daily hot-topic viral reels dispatched to ATHENA."""
+    return bool(_HOT_TOPIC_INTENT.search(message or ""))
 
 
 class OreilusEngine:
@@ -189,6 +206,14 @@ class OreilusEngine:
             return await self._respond_with_attachments(
                 db, conversation_id, system, history, user_message, attachments
             )
+
+        # 0a) Hot-topic reels → distill today's economic intel into the top verified
+        #     facts and dispatch solo viral reels to ATHENA (higgbot). Checked first,
+        #     since its phrasing ("post", "reel", "viral") overlaps other intents.
+        if settings.athena_enabled and wants_hot_topic_post(user_message):
+            handled = await self._respond_with_hot_topic_post(db, conversation_id, user_message)
+            if handled is not None:
+                return handled
 
         # 0b) NXG leads/funnel question → LIVE Supabase lookup (never cached, never
         #     reconstructed from memory), answered with name + critical savings point.
@@ -371,6 +396,59 @@ class OreilusEngine:
                        "booked — lead with the savings point each one came in for.")
         if rec:
             lines += ["", f"**Recommended:** {rec}"]
+        return "\n".join(lines)
+
+    async def _respond_with_hot_topic_post(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        user_message: str,
+    ) -> Optional[str]:
+        """Distill today's economic intel into the top facts and dispatch solo reels."""
+        try:
+            result = await hot_topic_reels.build_and_dispatch(db)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"hot-topic pipeline failed, using normal chat: {e}")
+            return None
+
+        if not result.get("ok"):
+            reason = result.get("reason")
+            msgs = {
+                "athena_disabled": ("Master, ATHENA delegation is currently disabled, so I "
+                                    "can't dispatch the reels. Enable ATHENA and I'll run it."),
+                "no_intel": ("Master, I have no compiled economic intelligence to draw from "
+                             "yet. Ask me for the economic news first, then I'll spin up the reels."),
+                "distill_failed": ("Master, I pulled the intelligence but couldn't distill the "
+                                   "reels this cycle. Try again shortly."),
+            }
+            reply = msgs.get(reason, "Master, I couldn't build the reels this time.")
+            await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+            return reply
+
+        reply = self._format_hot_topic(result.get("reels") or [])
+        await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+        await self._record_shared_memory(db, user_message, reply)
+        return reply
+
+    @staticmethod
+    def _format_hot_topic(reels: list[dict]) -> str:
+        if not reels:
+            return "Master, I couldn't build the reels this time."
+        lines = [
+            f"**Understood, Master — {len(reels)} solo reels dispatched to ATHENA.**",
+            "",
+            "From today's compiled economic intelligence, the hottest life-insurance angles:",
+        ]
+        for i, r in enumerate(reels, 1):
+            src = f" ({r.get('source')})" if r.get("source") else ""
+            lines.append(f"{i}. **{r.get('topic','')}** — {r.get('fact','')}{src}")
+        lines += [
+            "",
+            "ATHENA will produce each as an award-winning viral reel via the higgbot "
+            "(Higgsfield) engine, follow the ibluezcluezflow content guidelines, and publish "
+            "to the correct accounts. I'll surface each result — and whether it cleared her "
+            "quality gate — here through our shared memory as it lands.",
+        ]
         return "\n".join(lines)
 
     async def _respond_with_finance_news(
