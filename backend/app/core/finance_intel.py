@@ -264,6 +264,44 @@ class FinanceIntel:
         return fresh
 
     # ---------------------------------------------------------------- synthesis
+    def _news_system_prompt(self) -> str:
+        """News-led brief: real economic developments, stacked against the Master's world."""
+        return (
+            "You are ORELIUS, delivering the Master's daily U.S. economic intelligence, "
+            "stacked against his life-insurance and retirement business.\n\n"
+            "You have WEB SEARCH. Use it to find the LATEST verified economic developments "
+            "(roughly the last two weeks) from reputable outlets and official agencies: Fed "
+            "policy and rate decisions, inflation (CPI/PCE), jobs, GDP/growth, interest rates "
+            "and yields, markets, credit conditions, and anything materially affecting life "
+            "insurance, annuities, or retirement savings. You are ALSO given official numeric "
+            "data below to corroborate and quantify what you find.\n\n"
+            "HARD RULES:\n"
+            "1. Base EVERY factual claim and figure on your web-search results (cite the outlet) "
+            "or the official numeric data provided. NEVER invent a number or a development. If "
+            "search surfaces nothing new, say the stretch was quiet — do not fabricate.\n"
+            "2. Prefer primary/official sources (Federal Reserve, BLS, Treasury, BEA) and major "
+            "financial press (Reuters, AP, WSJ, CNBC, Bloomberg).\n"
+            "3. Plain English, for a sharp life-insurance professional — not an economist.\n\n"
+            "STRUCTURE:\n"
+            "• **What's Moving** — the 3–6 most important verified developments right now, one "
+            "tight line each WITH its source outlet. Lead with what changed (Fed, inflation, "
+            "jobs, rates, markets).\n"
+            "• **Stacked Against Your World — Pros & Cons** — for the themes that moved, explain "
+            "plainly how each could HELP or HURT, with explicit PROS and CONS for each of:\n"
+            "   – Life insurance policies (whole/term/IUL) and the insurers behind them\n"
+            "   – Annuities (fixed, indexed, income)\n"
+            "   – Individuals' bank savings (savings, CDs, money-market)\n"
+            "   – Employer/retirement accounts (401(k), IRA, pensions)\n"
+            "Tie every point to a development or figure above. Use the IRS as a STANDING "
+            "reference beacon (irs.gov) — §7702 tax-deferred build-up, §1035 exchanges, §7520 "
+            "rate, 401(k)/IRA/RMD rules — to reinforce WHY it matters. Label IRS references as "
+            "standing rules, never as freshly-pulled figures, and never invent an IRS dollar "
+            "limit (state it qualitatively and note the Master can confirm at irs.gov).\n"
+            "• **Bottom Line** — 2–4 tight sentences: what today's picture means for the Master "
+            "and his clients, plainly.\n\n"
+            "Address the reader as 'Master'."
+        )
+
     def _system_prompt(self) -> str:
         return (
             "You are ORELIUS, delivering the Master's daily U.S. economic intelligence. "
@@ -302,6 +340,63 @@ class FinanceIntel:
             "Address the reader as 'Master'."
         )
 
+    def _group_by_source(self, items: List[Dict]) -> Dict[str, list]:
+        by_source: Dict[str, list] = {}
+        for it in items:
+            by_source.setdefault(it["source"], []).append({
+                "metric": it["label"], "category": it["category"], "value": it["value"],
+                "unit": it["unit"], "date": it["date"], "change_vs_prior": it["change_vs_prior"],
+            })
+        return by_source
+
+    @staticmethod
+    def _sources_footer(sources: List[Dict[str, str]]) -> str:
+        if not sources:
+            return ""
+        cited = "; ".join(f"[{s.get('title') or s.get('url')}]({s.get('url')})" for s in sources[:8])
+        return f"\n\n**Sources:** {cited}"
+
+    async def _news_and_stack(self, numeric_payload: Dict, live: bool = False):
+        """News-led synthesis via web search + the official numeric data as support."""
+        import json as _json
+        if live:
+            intro = ("Search now for the LATEST verified U.S. economic developments and brief "
+                     "the Master per your rules. Use the official numbers below to quantify.")
+        else:
+            intro = ("Search for the latest verified U.S. economic developments, then brief the "
+                     "Master per your rules, weaving in the official numbers below as corroboration.")
+        user_text = intro + "\n\nOfficial numeric data (may be empty):\n" + _json.dumps(numeric_payload, indent=2)
+        return await claude_client.chat_with_web_search(
+            user_text=user_text,
+            system_prompt=self._news_system_prompt(),
+            allowed_domains=list(getattr(settings, "finance_news_domains", []) or []),
+            max_uses=int(getattr(settings, "web_search_max_uses", 5)),
+            max_tokens=settings.oreilus_report_max_tokens,
+        )
+
+    async def _fallback_numeric_brief(self, by_source: Dict, fresh: List[Dict], lookback: int) -> str:
+        """Data-only brief when web search is off/unavailable (never fabricates news)."""
+        if not fresh:
+            return (
+                "Master, no newly-released verified figures have appeared across the tracked "
+                f"official sources within the last {lookback} days that I haven't already "
+                "briefed you on, and live news search is unavailable this cycle. Nothing to "
+                "repeat — I will report the moment new data or news lands."
+            )
+        import json as _json
+        user_msg = ("Here is TODAY'S newly-released verified data (already filtered to new "
+                    "items only). Brief the Master per your rules:\n\n" + _json.dumps(by_source, indent=2))
+        try:
+            return await claude_client.chat(
+                messages=[{"role": "user", "content": user_msg}],
+                system_prompt=self._system_prompt(),
+                stream=False,
+                max_tokens=settings.oreilus_report_max_tokens,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"finance numeric synthesis failed: {e}")
+            return "Master, new data was retrieved but synthesis failed this cycle."
+
     async def generate_brief(self, db: AsyncSession) -> Dict:
         lookback = max(1, int(getattr(settings, "finance_lookback_days", 60)))
         since = (datetime.utcnow() - timedelta(days=lookback)).date()
@@ -313,43 +408,30 @@ class FinanceIntel:
             logger.error(f"finance gather failed: {e}")
             items = []
 
+        # No-repeat still applies to the NUMERIC figures (so we never relist the same
+        # ones); the NEWS narrative below is fresh every day via web search.
         fresh = self._filter_new(items, seen, since)
+        by_source = self._group_by_source(fresh)
 
-        if not fresh:
-            msg = (
-                "Master, no newly-released verified data has appeared across the tracked "
-                f"sources within the last {lookback} days that I haven't already briefed "
-                "you on. Nothing to repeat — I will report the moment new data lands."
-            )
-            await self._record(db, msg, {"as_of": datetime.utcnow().isoformat() + "Z", "new_items": 0}, ok=True)
-            return {"ok": True, "summary": msg, "data": {"new_items": 0}}
-
-        # Group the fresh items by source for a clean, cited payload.
-        by_source: Dict[str, list] = {}
-        for it in fresh:
-            by_source.setdefault(it["source"], []).append({
-                "metric": it["label"], "category": it["category"], "value": it["value"],
-                "unit": it["unit"], "date": it["date"], "change_vs_prior": it["change_vs_prior"],
-            })
         data = {"as_of": datetime.utcnow().isoformat() + "Z", "lookback_days": lookback,
                 "new_items": len(fresh), "sources": by_source,
                 "reference_sources": ["IRS (irs.gov) — standing tax rules & limits, corroborating authority"]}
 
-        import json as _json
-        user_msg = ("Here is TODAY'S newly-released verified data (already filtered to new "
-                    "items only). Brief the Master per your rules:\n\n" + _json.dumps(by_source, indent=2))
-        try:
-            brief = await claude_client.chat(
-                messages=[{"role": "user", "content": user_msg}],
-                system_prompt=self._system_prompt(),
-                stream=False,
-                max_tokens=settings.oreilus_report_max_tokens,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"finance synthesis failed: {e}")
-            brief = "Master, new data was retrieved but synthesis failed this cycle."
+        brief = ""
+        if getattr(settings, "web_search_enabled", True):
+            try:
+                brief, news_sources = await self._news_and_stack(by_source, live=False)
+                if brief:
+                    data["news_sources"] = news_sources[:20]
+                    brief += self._sources_footer(news_sources)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"finance web-search brief failed, using numeric fallback: {e}")
+                brief = ""
+        if not brief:
+            brief = await self._fallback_numeric_brief(by_source, fresh, lookback)
 
-        # Remember what we just reported, and prune anything past the barrier.
+        # Remember the numeric figures we surfaced, and prune past the barrier.
+        import json as _json  # noqa: F401
         for it in fresh:
             seen[it["key"]] = it["date"] or datetime.utcnow().strftime("%Y-%m-%d")
         seen = {k: v for k, v in seen.items() if (_parse_date(v) or since) >= since}
@@ -357,6 +439,30 @@ class FinanceIntel:
 
         await self._record(db, brief, data, ok=True)
         return {"ok": True, "summary": brief, "data": data}
+
+    async def live_briefing(self) -> str:
+        """On-demand economic-news briefing for chat — live, cited, never stale.
+
+        Pulls a current numeric snapshot (no no-repeat filter — this is a live look,
+        not the daily de-duped feed) and lets web search surface the real news.
+        """
+        try:
+            items = await self._gather_all()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"live briefing gather failed: {e}")
+            items = []
+        by_source = self._group_by_source(items)
+
+        if getattr(settings, "web_search_enabled", True):
+            try:
+                text, sources = await self._news_and_stack(by_source, live=True)
+                if text:
+                    return text + self._sources_footer(sources)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"live economic briefing failed: {e}")
+        return ("Master, I could not retrieve live economic news this moment — the search "
+                "service didn't respond. The official data feeds are still tracked; try me "
+                "again shortly and I'll have the latest developments stacked for you.")
 
     # ---------------------------------------------------------------- persistence
     async def _load_seen(self, db: AsyncSession) -> Dict[str, str]:

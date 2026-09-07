@@ -17,6 +17,7 @@ from .token_optimizer import token_optimizer
 from .shared_memory import shared_memory
 from .persona_profile import persona_profile
 from .nxg_intel import nxg_intel
+from .finance_intel import finance_intel
 from . import athena
 from ..models.conversation import MessageRole, MessageSource
 from ..models.audit_log import AuditEventType, AuditSeverity
@@ -50,6 +51,25 @@ _NXG_LEADS_INTENT = re.compile(
 def wants_nxg_leads(message: str) -> bool:
     """True if the Master is asking for NXG Life Group leads / funnel details."""
     return bool(_NXG_LEADS_INTENT.search(message or ""))
+
+
+# When the Master asks about the economy / markets / financial intelligence, ORELIUS
+# runs a LIVE, web-searched briefing (real cited news, stacked against life insurance)
+# instead of reconstructing stale numbers from memory.
+_FINANCE_NEWS_INTENT = re.compile(
+    r"financial intel|financial intelligence|economic (news|update|brief|intel|intelligence)"
+    r"|econom(y|ic).{0,20}(news|update|today|latest|happening|now)"
+    r"|\bmarkets?\b.{0,15}(update|news|report|today|doing|moving|looking)"
+    r"|finance brief|latest (economic|market|financial)"
+    r"|what.{0,3}s (going on|happening) (in|with) the (economy|market)"
+    r"|stack.{0,30}(life insurance|annuit|insurance)",
+    re.IGNORECASE,
+)
+
+
+def wants_finance_news(message: str) -> bool:
+    """True if the Master wants the live economic-intelligence briefing."""
+    return bool(_FINANCE_NEWS_INTENT.search(message or ""))
 
 
 class OreilusEngine:
@@ -174,6 +194,13 @@ class OreilusEngine:
         #     reconstructed from memory), answered with name + critical savings point.
         if wants_nxg_leads(user_message):
             handled = await self._respond_with_nxg_leads(db, conversation_id, user_message)
+            if handled is not None:
+                return handled
+
+        # 0c) Economy / markets question → LIVE web-searched briefing (real cited news,
+        #     stacked against life insurance) instead of stale numbers from memory.
+        if wants_finance_news(user_message):
+            handled = await self._respond_with_finance_news(db, conversation_id, user_message)
             if handled is not None:
                 return handled
 
@@ -345,6 +372,29 @@ class OreilusEngine:
         if rec:
             lines += ["", f"**Recommended:** {rec}"]
         return "\n".join(lines)
+
+    async def _respond_with_finance_news(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        user_message: str,
+    ) -> Optional[str]:
+        """Answer an economy/markets question with a LIVE, web-searched briefing.
+
+        Real cited developments stacked against life insurance/annuities/retirement —
+        current every time, never a memory reconstruction. Returns None on failure so
+        the normal chat path can take over.
+        """
+        try:
+            reply = await finance_intel.live_briefing()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"live finance briefing failed, using normal chat: {e}")
+            return None
+        if not reply:
+            return None
+        await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
+        await self._record_shared_memory(db, user_message, reply)
+        return reply
 
     async def _respond_with_athena(
         self,

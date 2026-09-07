@@ -94,6 +94,65 @@ class ClaudeClient:
         self._record_usage(response.usage)
         return response
 
+    async def chat_with_web_search(
+        self,
+        user_text: str,
+        system_prompt: str,
+        allowed_domains: Optional[List[str]] = None,
+        max_uses: int = 5,
+        max_tokens: Optional[int] = None,
+    ) -> tuple[str, List[Dict[str, str]]]:
+        """One-shot answer that may use Anthropic's server-side web search.
+
+        Haiku 4.5 uses the basic `web_search_20250305` variant. Anthropic runs the
+        searches on its side and returns the final answer with citations in the same
+        response; we only loop to handle `pause_turn`. Returns (answer_text, sources)
+        where sources is a list of {title, url} the model actually pulled — so the
+        brief is grounded in real, cited outlets and never fabricated.
+        """
+        tool: Dict = {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses}
+        if allowed_domains:
+            tool["allowed_domains"] = list(allowed_domains)[:64]
+
+        messages: List[Dict] = [{"role": "user", "content": user_text}]
+        sources: List[Dict[str, str]] = []
+        seen_urls: set[str] = set()
+        answer = ""
+
+        for _ in range(5):  # bounded pause_turn continuation
+            resp = await self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens or settings.oreilus_report_max_tokens,
+                temperature=self.temperature,
+                system=self._build_system(system_prompt),
+                messages=messages,
+                tools=[tool],
+            )
+            self._record_usage(resp.usage)
+
+            text_parts: List[str] = []
+            for block in getattr(resp, "content", []) or []:
+                btype = getattr(block, "type", None)
+                if btype == "text":
+                    text_parts.append(getattr(block, "text", "") or "")
+                elif btype == "web_search_tool_result":
+                    content = getattr(block, "content", None)
+                    # success -> list of results; error -> single object (skip)
+                    if isinstance(content, list):
+                        for r in content:
+                            url = getattr(r, "url", None)
+                            if url and url not in seen_urls:
+                                seen_urls.add(url)
+                                sources.append({"title": getattr(r, "title", "") or url, "url": url})
+            answer = "\n".join(p for p in text_parts if p).strip() or answer
+
+            if getattr(resp, "stop_reason", None) == "pause_turn":
+                messages.append({"role": "assistant", "content": resp.content})
+                continue
+            break
+
+        return answer, sources
+
     async def _stream_chat(
         self,
         messages: List[Dict[str, str]],

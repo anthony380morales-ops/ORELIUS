@@ -79,6 +79,20 @@ class Settings(BaseSettings):
     # Daily intel: never retrieve data older than this many days (the 2-month barrier).
     finance_lookback_days: int = 60
 
+    # --- Live economic news via Anthropic web search (verified outlets only) ---
+    # The finance brief pulls ACTUAL recent economic news (cited) and stacks it
+    # against life insurance/annuities/retirement — not just data-series numbers.
+    web_search_enabled: bool = True
+    web_search_max_uses: int = 5
+    # Reputable, verifiable sources the search is restricted to (never open web),
+    # keeping to the Master's "verified sources only" mandate.
+    finance_news_domains: list[str] = [
+        "reuters.com", "apnews.com", "wsj.com", "cnbc.com", "bloomberg.com",
+        "ft.com", "marketwatch.com", "barrons.com", "morningstar.com",
+        "federalreserve.gov", "bls.gov", "treasury.gov", "bea.gov", "irs.gov",
+        "sec.gov", "spglobal.com", "moodys.com", "limra.com", "iii.org", "naic.org",
+    ]
+
     # --- NXG Life Group funnel intelligence (leads + site traffic) ---
     # ORELIUS reads the LifeFunnel site's Supabase project (the same DB the admin
     # dashboard reads) for leads, and a page_views table for visitor/device counts.
