@@ -38,12 +38,17 @@ class ClaudeClient:
         system_prompt: str,
         stream: bool = False,
         max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
     ) -> str | AsyncGenerator[str, None]:
-        """Send a chat message to Claude (streaming or complete)."""
+        """Send a chat message to Claude (streaming or complete).
+
+        `temperature` overrides the default for this call — use a low value for
+        deterministic/structured (e.g. JSON) output.
+        """
         try:
             if stream:
                 return self._stream_chat(messages, system_prompt, max_tokens)
-            return await self._complete_chat(messages, system_prompt, max_tokens)
+            return await self._complete_chat(messages, system_prompt, max_tokens, temperature)
         except Exception as e:
             logger.error(f"Claude API error: {e}")
             raise
@@ -53,11 +58,12 @@ class ClaudeClient:
         messages: List[Dict[str, str]],
         system_prompt: str,
         max_tokens: Optional[int],
+        temperature: Optional[float] = None,
     ) -> str:
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens or self.max_tokens,
-            temperature=self.temperature,
+            temperature=self.temperature if temperature is None else temperature,
             system=self._build_system(system_prompt),
             messages=messages,
         )

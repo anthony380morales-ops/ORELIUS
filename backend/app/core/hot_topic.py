@@ -49,10 +49,12 @@ def _compile_system(n: int) -> str:
         "angle, in the brand voice.\n\n"
         "BRAND VOICE (guide the caption + hashtags):\n"
         f"{settings.ibluezcluezflow_guidelines}\n\n"
-        f"Return ONLY a JSON object: {{\"facts\": [ {n} plain-language strings ], "
-        "\"caption\": \"the full post caption\", \"hashtags\": \"space-separated viral "
-        "hashtags\", \"post_idea\": \"the reel/post concept in 1-3 sentences\"}}. "
-        "Output JSON only."
+        f"Return ONLY a single-line JSON object: {{\"facts\": [ {n} plain-language "
+        "strings ], \"caption\": \"the full post caption\", \"hashtags\": \"space-"
+        "separated viral hashtags\", \"post_idea\": \"the reel/post concept in 1-3 "
+        "sentences\"}}. Do NOT wrap it in markdown or code fences, and do NOT add any "
+        "text before or after. Inside string values use \\n for any line breaks — never "
+        "a raw line break. Output the JSON object only."
     )
 
 
@@ -114,29 +116,39 @@ class HotTopicReels:
 
         prompt = ("Here is today's compiled economic intelligence. Compile the package per "
                   "your rules:\n\n" + intel)
-        try:
-            raw = await claude_client.chat(
-                messages=[{"role": "user", "content": prompt}],
-                system_prompt=_compile_system(n),
-                stream=False,
-                max_tokens=settings.oreilus_report_max_tokens,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"hot-topic compile failed: {e}")
-            return {"ok": False, "reason": "compile_failed"}
 
-        obj = self._parse_json(raw)
-        facts = (obj or {}).get("facts") if isinstance(obj, dict) else None
-        if not (isinstance(facts, list) and facts):
+        obj: Optional[Dict] = None
+        raw = ""
+        for attempt in range(2):  # one retry — JSON reliability
+            try:
+                raw = await claude_client.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    system_prompt=_compile_system(n),
+                    stream=False,
+                    max_tokens=settings.oreilus_report_max_tokens,
+                    temperature=0.3,  # low temp → clean, structured JSON
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"hot-topic compile call failed (attempt {attempt + 1}): {e}")
+                continue
+            obj = self._parse_json(raw)
+            if isinstance(obj, dict) and isinstance(obj.get("facts"), list) and obj["facts"]:
+                break
+            obj = None
+
+        if obj is None:
+            logger.warning(f"hot-topic compile: unparseable model output: {raw[:300]!r}")
             return {"ok": False, "reason": "compile_failed"}
 
         package = {
-            "facts": [str(f) for f in facts][:n],
-            "caption": str((obj or {}).get("caption", "")).strip(),
-            "hashtags": str((obj or {}).get("hashtags", "")).strip(),
-            "post_idea": str((obj or {}).get("post_idea", "")).strip(),
+            "facts": [str(f).strip() for f in obj.get("facts") or [] if str(f).strip()][:n],
+            "caption": str(obj.get("caption", "")).strip(),
+            "hashtags": str(obj.get("hashtags", "")).strip(),
+            "post_idea": str(obj.get("post_idea", "")).strip(),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if not package["facts"]:
+            return {"ok": False, "reason": "compile_failed"}
         await self._save_package(db, package)
         return {"ok": True, "package": package}
 
@@ -212,8 +224,18 @@ class HotTopicReels:
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end == -1 or end <= start:
             return None
+        region = text[start:end + 1]
         try:
-            obj = json.loads(text[start:end + 1])
+            obj = json.loads(region)
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001
+            pass
+        # Tolerant retry: the model often puts RAW line breaks inside string values
+        # (multi-line captions), which is invalid JSON. Collapse control chars to
+        # spaces — structural whitespace stays valid, in-string breaks become spaces.
+        try:
+            cleaned = region.replace("\r", " ").replace("\t", " ").replace("\n", " ")
+            obj = json.loads(cleaned)
             return obj if isinstance(obj, dict) else None
         except Exception:  # noqa: BLE001
             return None
