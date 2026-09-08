@@ -13,8 +13,10 @@ psycopg2-binary==2.9.9
 redis==5.0.1
 hiredis==2.3.2
 
-# Claude API
-anthropic==0.18.1
+# Claude API — 0.69.0 supports the web_search server tool (economic-news briefing)
+# while keeping the `temperature` param and httpx (<1) the rest of the app pins.
+# 0.18.x predates web search (API rejects the tool); the 1.x line drops temperature.
+anthropic==0.69.0
 
 # Telegram Bot
 python-telegram-bot==20.8

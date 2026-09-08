@@ -1,0 +1,7 @@
+# Test-only dependencies — NOT installed in the production image.
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# The orchestration tests run against an in-memory async SQLite database so the
+# mission queue and adapters are exercised with real SQLAlchemy, no Postgres,
+# and no network. Production still uses Postgres (asyncpg) exclusively.
+aiosqlite==0.22.1

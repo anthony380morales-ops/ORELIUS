@@ -1,0 +1,37 @@
+# Render.com blueprint for ORELIUS — one free HTTPS service.
+# In Render: New -> Blueprint -> pick this repo. It reads this file.
+# You paste your Neon Postgres URL + secrets; Render issues HTTPS automatically.
+services:
+  - type: web
+    name: orelius
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Paste your free Neon Postgres connection string (see DEPLOY_LIVE.md)
+      - key: DATABASE_URL
+        sync: false
+      # Paste your Anthropic API key
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Auto-generated strong secrets
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      # The password you'll type to log in
+      - key: MASTER_PASSWORD
+        sync: false
+      # The login ID(s) allowed in (comma-separated). Log in with one of these.
+      - key: TELEGRAM_ALLOWED_USERS
+        value: anthony
+      # Shared secret for the ORELIUS <-> LUCIUS memory hub (/api/memory).
+      # Render generates + stores it; copy the value from the dashboard for LUCIUS.
+      - key: LUCIUS_SHARED_SECRET
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO

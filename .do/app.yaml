@@ -1,0 +1,83 @@
+# DigitalOcean App Platform spec for ORELIUS.
+# Deploys a FastAPI backend (Docker) + React static frontend + managed Postgres,
+# all on one HTTPS domain. See DEPLOY_LIVE.md for the step-by-step.
+#
+# Same domain routing:
+#   /api  and /ws  -> backend service
+#   everything else -> frontend static site (the PWA)
+name: orelius
+region: nyc
+
+services:
+  - name: backend
+    github:
+      repo: anthony380morales-ops/ORELIUS
+      branch: main
+      deploy_on_push: true
+    source_dir: backend
+    dockerfile_path: backend/Dockerfile
+    # Production run command (no --reload)
+    run_command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    http_port: 8000
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    health_check:
+      http_path: /health
+    routes:
+      - path: /api
+      - path: /ws
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+      - key: ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_WITH_YOUR_ANTHROPIC_KEY
+      - key: JWT_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_WITH_RANDOM_32_BYTES
+      - key: ENCRYPTION_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_WITH_RANDOM_32_BYTES
+      - key: MASTER_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_WITH_YOUR_PASSWORD
+      # The user IDs allowed to log in (comma-separated). Log in with one of these.
+      - key: TELEGRAM_ALLOWED_USERS
+        scope: RUN_TIME
+        value: anthony
+      - key: ENVIRONMENT
+        scope: RUN_TIME
+        value: production
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: INFO
+      - key: FRONTEND_URL
+        scope: RUN_TIME
+        value: ${APP_URL}
+      - key: BACKEND_URL
+        scope: RUN_TIME
+        value: ${APP_URL}
+
+static_sites:
+  - name: frontend
+    github:
+      repo: anthony380morales-ops/ORELIUS
+      branch: main
+      deploy_on_push: true
+    source_dir: frontend
+    build_command: npm install && npm run build
+    output_dir: dist
+    catchall_document: index.html
+    routes:
+      - path: /
+
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    production: false

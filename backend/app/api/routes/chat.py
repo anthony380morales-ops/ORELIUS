@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from ...database import get_db
 from ...core import oreilus_engine
 from ...core.auth import get_current_user  # SECURITY FIX: Add JWT authentication
@@ -15,12 +15,21 @@ from ...utils.logger import logger
 router = APIRouter()
 
 
+class Attachment(BaseModel):
+    """A file or photo attached to a chat message (sent as base64 from the browser)."""
+
+    name: str
+    media_type: str          # e.g. image/png, image/jpeg, application/pdf, text/plain
+    data: str                # base64-encoded file contents (no data: prefix)
+
+
 class ChatRequest(BaseModel):
     """Chat request model"""
 
     message: str
     source: Optional[str] = "web"
     stream: Optional[bool] = False
+    attachments: Optional[List[Attachment]] = None
     # user_id removed from request body - will come from JWT token for security
 
 
@@ -61,12 +70,14 @@ async def chat(
         logger.info(f"Chat request from user {current_user} via {source.value}")
 
         # Process message with O.R.E.I.L.U.S. (use authenticated user_id)
+        attachments = [a.model_dump() for a in request.attachments] if request.attachments else None
         response = await oreilus_engine.process_message(
             db=db,
             user_id=current_user,  # SECURITY FIX: Use authenticated user_id from JWT
             user_message=request.message,
             source=source,
             stream=False,
+            attachments=attachments,
         )
 
         return ChatResponse(response=response)
@@ -120,6 +131,54 @@ async def chat_stream(
     except Exception as e:
         logger.error(f"Streaming chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/history")
+async def chat_history(
+    db: AsyncSession = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    """Return the authenticated user's conversation from the last N days.
+
+    Powers persistence across app closes: the frontend loads this on open so the
+    conversation is held, not wiped. Messages older than the retention window are
+    pruned here (auto-delete → fresh holding period), so nothing older than the
+    window survives. Ordered oldest→newest for direct rendering.
+    """
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select, delete
+    from ...models.conversation import Conversation, Message, MessageRole
+    from ...config import settings
+
+    days = max(1, int(getattr(settings, "chat_retention_days", 7)))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Prune anything past the holding period (best-effort; never block the load).
+    try:
+        await db.execute(delete(Message).where(Message.created_at < cutoff))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"chat history prune skipped: {e}")
+
+    try:
+        rows = (
+            await db.execute(
+                select(Message)
+                .join(Conversation, Message.conversation_id == Conversation.id)
+                .where(Conversation.user_id == current_user)
+                .where(Message.created_at >= cutoff)
+                .where(Message.role != MessageRole.SYSTEM)
+                .order_by(Message.created_at.asc())
+                .limit(400)
+            )
+        ).scalars().all()
+        return [
+            {"role": m.role.value, "content": m.content,
+             "created_at": m.created_at.isoformat() if m.created_at else None}
+            for m in rows
+        ]
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"chat history error: {e}")
+        return []
 
 
 @router.get("/conversations/{user_id}")

@@ -4,12 +4,17 @@ Main entry point for the API server
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from .config import settings
 from .database import init_db
 from .utils.logger import logger
-from .api.routes import chat, system, auth, manus  # automation removed - replaced by Manus AI
+from .api.routes import chat, system, auth, memory, automation, ecosystem
+import mimetypes
 import os
+
+# Correct MIME type for the PWA manifest when FastAPI serves the built frontend
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # Create logs directory
 os.makedirs("logs", exist_ok=True)
@@ -28,55 +33,22 @@ async def lifespan(app: FastAPI):
     status = await oreilus_engine.validate_system()
     logger.info(f"System validation: {status}")
 
-    # Start Telegram bot if configured
-    from .telegram import telegram_bot
+    # Start Telegram bot only if configured (import is deferred so a
+    # Telegram-less deploy never loads the bot module)
     if settings.telegram_bot_token:
-        logger.info("Starting Telegram bot...")
         import asyncio
+        from .telegram import telegram_bot
+        logger.info("Starting Telegram bot...")
         asyncio.create_task(telegram_bot.start())
         logger.info("Telegram bot started")
-
-    # Initialize Manus AI integration
-    from .services.manus_client import get_manus_client
-    from .services.manus_scheduler import get_manus_scheduler
-    from .database import AsyncSessionLocal
-
-    logger.info("Initializing Manus AI integration...")
-    manus_client = get_manus_client()
-
-    # Validate Manus API
-    is_valid = await manus_client.validate_api_key()
-    logger.info(f"Manus AI API key validation: {'success' if is_valid else 'failed'}")
-
-    # Setup scheduler
-    manus_scheduler = get_manus_scheduler()
-    await manus_scheduler.setup(AsyncSessionLocal)
-    logger.info("Manus scheduler started - Daily tasks at 8:00 AM PST")
-
-    # Register webhook with Manus
-    base_url = os.getenv("BASE_URL", "http://localhost:8000")
-    webhook_url = f"{base_url}/api/manus/webhooks/manus"
-    try:
-        await manus_client.register_webhook(webhook_url)
-        logger.info(f"Manus webhook registered: {webhook_url}")
-    except Exception as e:
-        logger.warning(f"Failed to register Manus webhook: {e}")
 
     yield
 
     # Shutdown
-    logger.info("Shutting down O.R.E.I.L.U.S. system...")
+    logger.info("Shutting down O.R.E.L.I.U.S. system...")
 
-    # Stop Manus scheduler
-    manus_scheduler.shutdown()
-    logger.info("Manus scheduler stopped")
-
-    # Close Manus client
-    await manus_client.close()
-    logger.info("Manus AI client closed")
-
-    # Stop Telegram bot
     if settings.telegram_bot_token:
+        from .telegram import telegram_bot
         await telegram_bot.stop()
 
 
@@ -110,8 +82,9 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api", tags=["Authentication"])  # No auth required for login
 app.include_router(chat.router, prefix="/api", tags=["Chat"])  # Auth will be added to individual routes
 app.include_router(system.router, prefix="/api", tags=["System"])  # Auth will be added to individual routes
-# app.include_router(automation.router, prefix="/api", tags=["Automation"])  # REMOVED - Replaced by Manus AI
-app.include_router(manus.router, prefix="/api/manus", tags=["Manus AI"])  # Manus AI integration
+app.include_router(memory.router, prefix="/api", tags=["Shared Memory"])  # ORELIUS <-> LUCIUS hub
+app.include_router(automation.router, prefix="/api", tags=["Automation"])  # daily finance briefing
+app.include_router(ecosystem.router, prefix="/api", tags=["Ecosystem"])  # multi-agent orchestration control surface
 
 # WebSocket endpoint
 from .api.websocket import websocket_endpoint
@@ -124,21 +97,29 @@ async def websocket_route(websocket: WebSocket, user_id: str):
     await websocket_endpoint(websocket, user_id)
 
 
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "system": "O.R.E.I.L.U.S.",
-        "version": "0.1.0",
-        "status": "operational",
-        "description": "Optimized Revenue Engine & Intelligent Logistics Unified System",
-    }
-
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+# Serve the built frontend (the phone app) from the same service when present.
+# This lets ORELIUS deploy as ONE container on any free host. API routes and
+# /health above are registered first, so they always win over the static mount.
+STATIC_DIR = os.getenv(
+    "STATIC_DIR", os.path.join(os.path.dirname(__file__), "..", "static")
+)
+if os.path.isdir(STATIC_DIR):
+    logger.info(f"Serving frontend from {STATIC_DIR}")
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "system": "O.R.E.L.I.U.S.",
+            "version": "0.1.0",
+            "status": "operational",
+        }
 
 
 if __name__ == "__main__":
