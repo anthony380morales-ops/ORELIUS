@@ -68,9 +68,14 @@ class Flags:
         logger.info(f"System flag set: {name}={value}")
 
     async def mode(self, db: AsyncSession) -> SocialMode:
-        """Effective run mode. SYSTEM_PAUSE forces simulation regardless of config."""
+        """Effective run mode. SYSTEM_PAUSE forces simulation regardless of anything
+        else. Otherwise a durable RUN_LIVE override (set by the credential-gated
+        activation flow, Phase 15) wins over the config default, so going live — and
+        reverting to simulation — is an instant, reversible runtime action."""
         if await self.get(db, "SYSTEM_PAUSE"):
             return SocialMode.SIMULATION
+        if await self.get(db, "RUN_LIVE"):
+            return SocialMode.LIVE
         raw = str(getattr(settings, "social_automation_mode", "simulation")).lower()
         try:
             return SocialMode(raw)

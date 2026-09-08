@@ -30,6 +30,7 @@ from ...orchestration.analytics import analytics
 from ...orchestration.optimizer import optimizer, TUNABLES
 from ...orchestration.dashboard import dashboard
 from ...orchestration.acceptance import acceptance_harness
+from ...orchestration.activation import activation, CONFIRM_PHRASE
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -591,3 +592,34 @@ async def acceptance_run(
     asserts every safety invariant (no real dispatch, no forbidden dashes, compliance
     gating, kill switches). Returns a checklist."""
     return await acceptance_harness.run(db)
+
+
+# ------------------------------------------------ production activation (Phase 15)
+@router.get("/ecosystem/activation/status")
+async def activation_status(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Run mode + per-provider credential readiness + how to activate."""
+    return await activation.status(db)
+
+
+@router.post("/ecosystem/activation/activate")
+async def activation_activate(
+    confirm: str = Body("", embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Flip to LIVE — gated on the typed confirmation, real credentials, and a passing
+    acceptance run. Returns a structured refusal (nothing changes) if any gate fails."""
+    out = await activation.activate(db, confirm=confirm, actor=user)
+    return out
+
+
+@router.post("/ecosystem/activation/deactivate")
+async def activation_deactivate(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Return to SIMULATION immediately — always allowed, no gate."""
+    return await activation.deactivate(db, actor=user)
