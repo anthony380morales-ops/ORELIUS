@@ -129,6 +129,7 @@ def _default_roster() -> List[AgentSpec]:
         AgentSpec(
             id="allocation", description="Dynamically reallocate the daily touchpoint budget by outcome.",
             capabilities=["allocation"], risk=RiskClass.MEDIUM, cost=CostClass.NONE,
+            implemented=True,
         ),
         AgentSpec(
             id="mission_evaluator", description="Score completed missions; feed learning back to ORELIUS.",

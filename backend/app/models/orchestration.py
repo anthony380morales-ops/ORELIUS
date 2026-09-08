@@ -72,6 +72,23 @@ class Prospect(Base):
     last_inbound_at = Column(DateTime, nullable=True)
 
 
+class AllocationSnapshot(Base):
+    """One day's touchpoint allocation plan (directive §17, §18). Additive.
+
+    Records how the daily touchpoint budget was distributed across brands and
+    meaningful action types, plus the inputs (baseline vs performance weights) so
+    the allocation is auditable and the adaptive engine can learn against it."""
+    __tablename__ = "allocation_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    day = Column(String(10), index=True)                 # YYYY-MM-DD (PT)
+    total = Column(Integer, default=0)                    # touchpoints planned
+    mode = Column(String(16), default="simulation")
+    plan = Column(JSON, default=dict)                     # {brand: {action: n, ...}, ...}
+    inputs = Column(JSON, default=dict)                   # weights + flags used
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class SystemFlag(Base):
     __tablename__ = "system_flags"
 

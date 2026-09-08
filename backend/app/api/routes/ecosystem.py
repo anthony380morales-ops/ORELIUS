@@ -25,6 +25,7 @@ from ...orchestration.agents import audience_intelligence, social_opportunity
 from ...orchestration.conversation_engine import conversation_engine
 from ...orchestration.prospects import prospect_memory
 from ...orchestration.compliance import compliance_engine
+from ...orchestration.allocation import allocation_engine
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -427,3 +428,29 @@ async def compliance_check(
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=422, detail=f"invalid packet: {e}")
     raise HTTPException(status_code=400, detail="provide 'message' or 'packet'")
+
+
+# ------------------------------------------------ touchpoint allocation (Phase 10)
+@router.post("/ecosystem/allocation/plan")
+async def allocation_plan(
+    total: Optional[int] = Body(None, embed=True),
+    persist: bool = Body(False, embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Compute today's touchpoint allocation across brands and action types (targets,
+    not quotas). Paused brands get zero. persist=true stores a snapshot."""
+    if persist:
+        return await allocation_engine.plan_and_store(db, total=total)
+    return await allocation_engine.plan_day(db, total=total)
+
+
+@router.get("/ecosystem/allocation/latest")
+async def allocation_latest(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    snap = await allocation_engine.latest(db)
+    if not snap:
+        return {"snapshot": None}
+    return {"snapshot": snap}
