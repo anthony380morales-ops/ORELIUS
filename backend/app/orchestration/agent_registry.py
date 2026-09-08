@@ -101,10 +101,12 @@ def _default_roster() -> List[AgentSpec]:
         AgentSpec(
             id="audience_intelligence", description="Classify opportunities into audiences with confidence.",
             capabilities=["audience_classification"], risk=RiskClass.LOW, cost=CostClass.LOW,
+            required_tools=["nxg_intel"], implemented=True,
         ),
         AgentSpec(
             id="social_opportunity", description="Find legitimately actionable social opportunities.",
             capabilities=["opportunity_detection"], risk=RiskClass.MEDIUM, cost=CostClass.LOW,
+            implemented=True,
         ),
         AgentSpec(
             id="conversation_strategist", description="Decide next best action for a conversation.",

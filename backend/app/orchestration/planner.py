@@ -19,9 +19,12 @@ from .mission import (
     MissionPacket, Brand, Platform, Objective, Priority,
     Topic, Creative, Compliance, ComplianceStatus, Audience,
 )
-from .agents import economic_intelligence, financial_impact
+from .agents import (
+    economic_intelligence, financial_impact, audience_intelligence, social_opportunity,
+)
 from .agents.economic_intelligence import EconomicSignal
 from .agents.financial_impact import ImpactAngle
+from .agents.audience_intelligence import AudienceInsight, apply_audience
 from .mission_queue import mission_queue
 
 # Each brand's home platform (baselines from config; directive §22 keeps them apart).
@@ -41,9 +44,12 @@ def build_content_missions(
     angles: List[ImpactAngle],
     brand: Brand,
     platform: Optional[Platform] = None,
+    audience: Optional[AudienceInsight] = None,
 ) -> List[MissionPacket]:
     """Pure: turn ranked impact angles into content MissionPackets (compliance
-    PENDING → held until approved). Signals are matched to angles by id."""
+    PENDING → held until approved). Signals are matched to angles by id. When an
+    audience insight is given, each mission's audience is sharpened to the
+    dominant real concern."""
     platform = platform or _BRAND_PLATFORM.get(brand, Platform.INSTAGRAM)
     by_id = {s.id: s for s in signals}
     missions: List[MissionPacket] = []
@@ -51,7 +57,7 @@ def build_content_missions(
         sig = by_id.get(angle.signal_id)
         if not sig:
             continue
-        missions.append(MissionPacket(
+        mp = MissionPacket(
             brand=brand,
             platform=platform,
             objective=Objective.CONTENT_PUBLISH,
@@ -62,7 +68,10 @@ def build_content_missions(
             priority=_priority_for(angle.opportunity_score),
             brief={"angle": angle.angle, "framing": sig.framing,
                    "opportunity_score": angle.opportunity_score},
-        ))
+        )
+        if audience is not None:
+            apply_audience(mp, audience)
+        missions.append(mp)
     return missions
 
 
@@ -76,7 +85,9 @@ class IntelligencePlanner:
         enqueue=True the proposals are queued (still BLOCKED on compliance)."""
         signals = await economic_intelligence.gather(db)
         angles = financial_impact.assess(signals, brand)[:max(1, limit)]
-        missions = build_content_missions(signals, angles, brand, platform)
+        insight = await audience_intelligence.profile(db, brand)
+        missions = build_content_missions(signals, angles, brand, platform, audience=insight)
+        opportunities = await social_opportunity.discover(db, brand)
 
         enqueued: List[str] = []
         if enqueue:
@@ -91,6 +102,8 @@ class IntelligencePlanner:
             "brand": brand.value,
             "signals": [s.model_dump(mode="json") for s in signals],
             "angles": [a.model_dump(mode="json") for a in angles],
+            "audience": insight.model_dump(mode="json"),
+            "opportunities": [o.model_dump(mode="json") for o in opportunities],
             "missions": [m.model_dump(mode="json") for m in missions],
             "enqueued": enqueued,
             "note": ("proposals queued (held on compliance)" if enqueue

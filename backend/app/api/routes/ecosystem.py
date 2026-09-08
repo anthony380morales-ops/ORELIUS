@@ -21,6 +21,7 @@ from ...orchestration.mission_queue import mission_queue
 from ...orchestration.adapters import athena_adapter, higgbot_adapter, lucius_adapter
 from ...orchestration.control import control_surface, SCOPE_TO_FLAG
 from ...orchestration.planner import intelligence_planner
+from ...orchestration.agents import audience_intelligence, social_opportunity
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -311,3 +312,34 @@ async def intelligence_scan(
     except ValueError:
         raise HTTPException(status_code=400, detail="brand must be NXG or IBC")
     return await intelligence_planner.scan(db, b, enqueue=bool(enqueue))
+
+
+def _brand_or_400(brand: str) -> Brand:
+    try:
+        return Brand(brand.strip().upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="brand must be NXG or IBC")
+
+
+@router.get("/ecosystem/audience/{brand}")
+async def audience_profile(
+    brand: str,
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Who to reach for a brand + their top real concerns (NXG reuses live leads)."""
+    insight = await audience_intelligence.profile(db, _brand_or_400(brand))
+    return insight.model_dump(mode="json")
+
+
+@router.get("/ecosystem/opportunities/{brand}")
+async def social_opportunities(
+    brand: str,
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Compliant slate of permitted touchpoint types, sized to the brand baseline.
+    Real target discovery is gated to connected platform APIs (requires_live_api)."""
+    opps = await social_opportunity.discover(db, _brand_or_400(brand))
+    return {"brand": _brand_or_400(brand).value,
+            "opportunities": [o.model_dump(mode="json") for o in opps]}
