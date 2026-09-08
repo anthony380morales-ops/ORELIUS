@@ -115,6 +115,14 @@ class AllocationEngine:
                     getattr(settings, "social_daily_touchpoint_target", 1050))
         mode = await flags.mode(db)
 
+        # The exploration floor is adaptively tuned (Phase 12), within safe bounds.
+        try:
+            from .optimizer import optimizer
+            exploration = await optimizer.get_param(db, "allocation.exploration")
+        except Exception as e:  # noqa: BLE001 - never let tuning break planning
+            logger.debug(f"exploration param read fell back to default: {e}")
+            exploration = 0.15
+
         brand_weights = await self._active_brand_weights(db)
         brand_totals = apportion(total, brand_weights)
 
@@ -131,7 +139,7 @@ class AllocationEngine:
                 except Exception as e:  # noqa: BLE001
                     logger.debug(f"perf provider failed for {b.value}: {e}")
                     perf = None
-            weights = blend_weights(baseline, perf)
+            weights = blend_weights(baseline, perf, exploration=exploration)
             plan[b.value] = apportion(bt, weights) if bt > 0 else {k: 0 for k in baseline}
             inputs[b.value] = {"brand_total": bt, "weights": weights,
                                "used_performance": bool(perf)}
@@ -139,7 +147,7 @@ class AllocationEngine:
         planned_total = sum(sum(a.values()) for a in plan.values())
         return {
             "day": _pt_day(), "mode": mode.value, "target": total,
-            "planned_total": planned_total,
+            "planned_total": planned_total, "exploration": exploration,
             "brand_totals": brand_totals, "plan": plan, "inputs": inputs,
             "note": ("system paused — zero allocation" if planned_total == 0
                      else "allocation plan (targets, not quotas)"),

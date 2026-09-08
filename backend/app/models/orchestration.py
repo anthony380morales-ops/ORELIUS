@@ -91,6 +91,36 @@ class TouchpointEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class TunedParam(Base):
+    """A single adaptively-tuned parameter (directive §12). Additive.
+
+    ONLY whitelisted, bounded orchestration parameters/routing choices live here —
+    never source, never the messaging/compliance/kill-switch rules. The value is
+    JSON so ints, floats, and enum choices all fit one column."""
+    __tablename__ = "tuned_params"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(64), unique=True, index=True, nullable=False)
+    value = Column(JSON, default=dict)                    # {"v": <number|str>}
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class OptimizationLog(Base):
+    """Audit trail for every optimization decision (directive §12 auditable/reversible)."""
+    __tablename__ = "optimization_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(64), index=True)
+    old_value = Column(JSON, nullable=True)
+    new_value = Column(JSON, nullable=True)
+    status = Column(String(16), default="applied")        # applied|escalated|reverted
+    reason = Column(String(512), nullable=True)
+    actor = Column(String(48), default="optimizer")
+    metric_before = Column(Float, nullable=True)          # North-Star at change time
+    metric_after = Column(Float, nullable=True)           # filled on evaluation
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class AllocationSnapshot(Base):
     """One day's touchpoint allocation plan (directive §17, §18). Additive.
 

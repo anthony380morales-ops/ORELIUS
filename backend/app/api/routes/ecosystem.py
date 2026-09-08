@@ -27,6 +27,7 @@ from ...orchestration.prospects import prospect_memory
 from ...orchestration.compliance import compliance_engine
 from ...orchestration.allocation import allocation_engine
 from ...orchestration.analytics import analytics
+from ...orchestration.optimizer import optimizer, TUNABLES
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -506,3 +507,60 @@ async def analytics_evaluate(
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail=out.get("reason", "not found"))
     return out
+
+
+# ------------------------------------------------ adaptive optimization (Phase 12)
+@router.get("/ecosystem/optimizer/params")
+async def optimizer_params(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Current effective values of every tunable parameter + their bounds."""
+    return {"params": await optimizer.all_params(db), "tunables": TUNABLES}
+
+
+@router.get("/ecosystem/optimizer/recommend")
+async def optimizer_recommend(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Recommendations from the live North-Star data (applies nothing)."""
+    return {"recommendations": await optimizer.recommend(db)}
+
+
+@router.post("/ecosystem/optimizer/propose")
+async def optimizer_propose(
+    key: str = Body(..., embed=True),
+    value=Body(..., embed=True),
+    reason: str = Body("", embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Propose a bounded change to ONE tunable parameter. Within max_step it applies;
+    a larger step is escalated for human approval. Non-tunable keys are rejected."""
+    out = await optimizer.propose(db, key, value, reason=reason, actor=user)
+    if not out.get("ok"):
+        raise HTTPException(status_code=400,
+                            detail=out.get("reason", "not tunable"))
+    return out
+
+
+@router.post("/ecosystem/optimizer/revert")
+async def optimizer_revert(
+    key: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Roll a parameter back to its previous value."""
+    return await optimizer.revert(db, key, actor=user)
+
+
+@router.post("/ecosystem/optimizer/auto")
+async def optimizer_auto(
+    apply: bool = Body(False, embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """One optimization cycle: roll back any regression, recommend, and (if apply)
+    apply the safe within-bound recommendations."""
+    return await optimizer.auto_tune(db, apply=bool(apply))
