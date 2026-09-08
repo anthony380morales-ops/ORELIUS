@@ -18,7 +18,8 @@ from ...core.auth import get_current_user
 from ...utils.logger import logger
 from ...orchestration.mission import validate_mission, MissionStatus
 from ...orchestration.mission_queue import mission_queue
-from ...orchestration.adapters import athena_adapter, higgbot_adapter
+from ...orchestration.adapters import athena_adapter, higgbot_adapter, lucius_adapter
+from ...orchestration.control import control_surface, SCOPE_TO_FLAG
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
 router = APIRouter()
@@ -198,3 +199,95 @@ async def set_flag(
     await flags.set(db, name, bool(value))
     logger.info(f"kill switch {name}={value} set by {user}")
     return await flags.snapshot(db)
+
+
+# ----------------------------------------------- LUCIUS control surface (Phase 5)
+@router.get("/ecosystem/control/status")
+async def control_status(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """One consolidated snapshot LUCIUS reads back to the owner: mode, kill
+    switches, queue depth, pending approvals + handoffs, executor health."""
+    return await control_surface.status(db)
+
+
+@router.post("/ecosystem/control/pause")
+async def control_pause(
+    scope: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Voice-friendly pause by scope (all·messaging·publishing·outbound·nxg·ibc·
+    higgbot·athena·creative·social·…)."""
+    out = await control_surface.pause(db, scope, actor=user)
+    if not out.get("ok"):
+        raise HTTPException(status_code=400,
+                            detail=f"unknown scope; allowed: {sorted(set(SCOPE_TO_FLAG))}")
+    return out
+
+
+@router.post("/ecosystem/control/resume")
+async def control_resume(
+    scope: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Voice-friendly resume by scope (inverse of pause)."""
+    out = await control_surface.resume(db, scope, actor=user)
+    if not out.get("ok"):
+        raise HTTPException(status_code=400,
+                            detail=f"unknown scope; allowed: {sorted(set(SCOPE_TO_FLAG))}")
+    return out
+
+
+@router.get("/ecosystem/control/approvals")
+async def control_approvals(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Missions held by the compliance gate, awaiting owner approval."""
+    return {"pending": await control_surface.pending_approvals(db)}
+
+
+@router.post("/ecosystem/control/approvals/{mission_id}/approve")
+async def control_approve(
+    mission_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    ok = await control_surface.approve(db, mission_id)
+    return {"ok": ok, "mission_id": mission_id}
+
+
+@router.get("/ecosystem/control/handoffs")
+async def control_handoffs(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Work needing a human: escalated + explicit human-handoff missions."""
+    return {"pending": await control_surface.pending_handoffs(db)}
+
+
+@router.post("/ecosystem/control/handoffs/{mission_id}/resolve")
+async def control_resolve_handoff(
+    mission_id: str,
+    note: str = Body("", embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    ok = await control_surface.resolve_handoff(db, mission_id, note=note)
+    return {"ok": ok, "mission_id": mission_id}
+
+
+@router.get("/ecosystem/lucius/health")
+async def lucius_health(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    return await lucius_adapter.health(db)
+
+
+@router.get("/ecosystem/lucius/capabilities")
+async def lucius_capabilities(user: str = Depends(get_current_user)):
+    return await lucius_adapter.capabilities()

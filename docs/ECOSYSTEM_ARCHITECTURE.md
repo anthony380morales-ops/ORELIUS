@@ -61,7 +61,7 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 | **Mission queue** (`app/orchestration/mission_queue.py`) | ORELIUS | ORELIUS planner/workers | ✅ Phase 2 |
 | **ATHENA adapter** (`/ecosystem/athena/*`) | ORELIUS | ORELIUS | ✅ Phase 3 (simulation-first) |
 | **HIGGBOT creative contract** (`app/orchestration/creative.py`, `/ecosystem/higgbot/*`) | ORELIUS → ATHENA → HIGGBOT | ORELIUS | ✅ Phase 4 (simulation-first) |
-| LUCIUS control surface | LUCIUS ↔ ORELIUS | | ⏳ Phase 5 |
+| **LUCIUS control surface** (`app/orchestration/control.py`, `/ecosystem/control/*`, `/ecosystem/lucius/*`) | LUCIUS ↔ ORELIUS | LUCIUS (voice) | ✅ Phase 5 |
 
 **Absolute messaging rule (live now):** no autonomous message may ever contain `--`. Enforced by `messaging_policy.enforce()` (validate → regenerate → sanitize backstop). The single em-dash `—` is allowed.
 
@@ -86,7 +86,7 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 | 2 | Durable mission queue (Postgres): retries, backoff, dead-letter, priority, dedupe, states, expiry | ✅ **this change** (13/13 tests) |
 | 3 | ATHENA adapter (`/ecosystem/athena/*`) over the existing job API, simulation-first | ✅ **this change** (13/13 tests) |
 | 4 | HIGGBOT creative contract (via ATHENA, simulation-first, budget-capped) | ✅ **this change** (10/10 tests) |
-| 5 | LUCIUS control surface (status, run, pause/resume, approvals, handoffs) | ⏳ |
+| 5 | LUCIUS control surface (status, pause/resume by scope, approvals, handoffs, owner alerts) | ✅ **this change** (8/8 tests) |
 | 6 | Economic intelligence + financial impact agents (reuse `finance_intel`) | ⏳ |
 | 7 | Audience + social-opportunity agents | ⏳ |
 | 8 | Conversation intelligence (state machine, next-action, prospect memory) | ⏳ |
