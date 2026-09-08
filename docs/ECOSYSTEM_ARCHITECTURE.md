@@ -87,7 +87,7 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 | 3 | ATHENA adapter (`/ecosystem/athena/*`) over the existing job API, simulation-first | ✅ **this change** (13/13 tests) |
 | 4 | HIGGBOT creative contract (via ATHENA, simulation-first, budget-capped) | ✅ **this change** (10/10 tests) |
 | 5 | LUCIUS control surface (status, pause/resume by scope, approvals, handoffs, owner alerts) | ✅ **this change** (8/8 tests) |
-| 6 | Economic intelligence + financial impact agents (reuse `finance_intel`) | ⏳ |
+| 6 | Economic intelligence + financial impact agents + intelligence→mission planner (reuse `finance_intel`/`hot_topic`) | ✅ **this change** (8/8 tests) |
 | 7 | Audience + social-opportunity agents | ⏳ |
 | 8 | Conversation intelligence (state machine, next-action, prospect memory) | ⏳ |
 | 9 | Compliance/risk engine (mandatory reviewer) | ⏳ |

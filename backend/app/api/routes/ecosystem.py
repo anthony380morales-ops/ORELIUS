@@ -20,6 +20,8 @@ from ...orchestration.mission import validate_mission, MissionStatus
 from ...orchestration.mission_queue import mission_queue
 from ...orchestration.adapters import athena_adapter, higgbot_adapter, lucius_adapter
 from ...orchestration.control import control_surface, SCOPE_TO_FLAG
+from ...orchestration.planner import intelligence_planner
+from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
 router = APIRouter()
@@ -291,3 +293,21 @@ async def lucius_health(
 @router.get("/ecosystem/lucius/capabilities")
 async def lucius_capabilities(user: str = Depends(get_current_user)):
     return await lucius_adapter.capabilities()
+
+
+# --------------------------------------------- intelligence → missions (Phase 6)
+@router.post("/ecosystem/intelligence/scan")
+async def intelligence_scan(
+    brand: str = Body("NXG", embed=True),
+    enqueue: bool = Body(False, embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Run economic-intelligence → financial-impact → proposed content missions
+    for a brand. Proposals only by default; enqueue=true queues them (each still
+    held on the compliance gate). Reuses the existing finance/hot-topic pipeline."""
+    try:
+        b = Brand(brand.strip().upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="brand must be NXG or IBC")
+    return await intelligence_planner.scan(db, b, enqueue=bool(enqueue))

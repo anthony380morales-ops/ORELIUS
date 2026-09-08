@@ -95,7 +95,8 @@ def _default_roster() -> List[AgentSpec]:
         AgentSpec(
             id="financial_impact", description="Turn economic events into plain-English implications.",
             capabilities=["impact_analysis", "fact_vs_interpretation"],
-            risk=RiskClass.MEDIUM, cost=CostClass.MEDIUM, fallback="economic_intelligence",
+            risk=RiskClass.MEDIUM, cost=CostClass.LOW, fallback="economic_intelligence",
+            implemented=True,
         ),
         AgentSpec(
             id="audience_intelligence", description="Classify opportunities into audiences with confidence.",
