@@ -58,7 +58,8 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 | **Agent registry** (`app/orchestration/agent_registry.py`) | ORELIUS | ORELIUS planner | ✅ Phase 1 (declarations) |
 | **Messaging humanization policy** (`app/orchestration/messaging_policy.py`) | ORELIUS | every autonomous message channel | ✅ Phase 1 |
 | **Kill switches / run-mode** (`app/orchestration/flags.py`) | ORELIUS | all executors | ✅ Phase 1 |
-| ATHENA adapter (`/ecosystem/athena/*`) | ORELIUS | ORELIUS | ⏳ Phase 3 |
+| **Mission queue** (`app/orchestration/mission_queue.py`) | ORELIUS | ORELIUS planner/workers | ✅ Phase 2 |
+| **ATHENA adapter** (`/ecosystem/athena/*`) | ORELIUS | ORELIUS | ✅ Phase 3 (simulation-first) |
 | HIGGBOT creative contract | ORELIUS → ATHENA → HIGGBOT | | ⏳ Phase 4 |
 | LUCIUS control surface | LUCIUS ↔ ORELIUS | | ⏳ Phase 5 |
 
@@ -82,8 +83,8 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 |---|---|---|
 | 0 | Architecture audit + map | ✅ done |
 | 1 | Mission protocol · agent registry · messaging guardrail · kill switches · run-mode · DB spine | ✅ **this change** (12/12 tests) |
-| 2 | Durable mission queue (Postgres + Redis): retries, backoff, dead-letter, priority, dedupe, states | ⏳ |
-| 3 | ATHENA adapter (`/ecosystem/athena/*`) over the existing job API | ⏳ |
+| 2 | Durable mission queue (Postgres): retries, backoff, dead-letter, priority, dedupe, states, expiry | ✅ **this change** (13/13 tests) |
+| 3 | ATHENA adapter (`/ecosystem/athena/*`) over the existing job API, simulation-first | ✅ **this change** (13/13 tests) |
 | 4 | HIGGBOT creative contract (via ATHENA, MCP, simulation-first) | ⏳ |
 | 5 | LUCIUS control surface (status, run, pause/resume, approvals, handoffs) | ⏳ |
 | 6 | Economic intelligence + financial impact agents (reuse `finance_intel`) | ⏳ |

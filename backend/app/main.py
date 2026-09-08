@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from .config import settings
 from .database import init_db
 from .utils.logger import logger
-from .api.routes import chat, system, auth, memory, automation
+from .api.routes import chat, system, auth, memory, automation, ecosystem
 import mimetypes
 import os
 
@@ -84,6 +84,7 @@ app.include_router(chat.router, prefix="/api", tags=["Chat"])  # Auth will be ad
 app.include_router(system.router, prefix="/api", tags=["System"])  # Auth will be added to individual routes
 app.include_router(memory.router, prefix="/api", tags=["Shared Memory"])  # ORELIUS <-> LUCIUS hub
 app.include_router(automation.router, prefix="/api", tags=["Automation"])  # daily finance briefing
+app.include_router(ecosystem.router, prefix="/api", tags=["Ecosystem"])  # multi-agent orchestration control surface
 
 # WebSocket endpoint
 from .api.websocket import websocket_endpoint

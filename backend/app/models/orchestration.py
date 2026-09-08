@@ -29,6 +29,15 @@ class Mission(Base):
     result = Column(JSON, default=dict)           # executor result / evaluation
     cost_usd = Column(Float, default=0.0)
 
+    # Queue mechanics (directive §9): retries, backoff, dedup, scheduling.
+    dedup_key = Column(String(80), index=True, nullable=True)
+    attempts = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=3)
+    next_attempt_at = Column(DateTime, nullable=True, index=True)  # backoff gate
+    scheduled_at = Column(DateTime, nullable=True, index=True)     # future execution
+    error = Column(String(512), nullable=True)
+    executor = Column(String(32), default="athena")               # who runs it
+
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     expires_at = Column(DateTime, nullable=True, index=True)
