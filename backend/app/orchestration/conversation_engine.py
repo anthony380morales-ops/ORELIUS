@@ -60,8 +60,24 @@ class ConversationEngine:
                        f"They said: {message[:200]}")
             logger.info(f"conversation {prospect_id} routed to human")
 
+        # Record this interaction as a meaningful touchpoint (feedback loop → Phase
+        # 10 allocation). qualified when it reaches qualification/handoff; meaningful
+        # when we produced a genuine reply; none when nothing actionable happened.
+        outcome = ("qualified" if (decision.needs_human or nxt in (
+                       ConversationStage.QUALIFIED, ConversationStage.ROUTED,
+                       ConversationStage.HUMAN_HANDOFF))
+                   else "meaningful" if decision.draft_message else "none")
+        try:
+            from .analytics import analytics
+            await analytics.record_touchpoint(
+                db, brand=brand, action="reply", outcome=outcome,
+                platform=platform, prospect_id=prospect_id)
+        except Exception as e:  # noqa: BLE001 - telemetry must not break the reply
+            logger.debug(f"touchpoint record skipped: {e}")
+
         out = decision.model_dump(mode="json")
         out["ok"] = True
+        out["touchpoint_outcome"] = outcome
         return out
 
 

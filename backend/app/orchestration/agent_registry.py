@@ -125,6 +125,7 @@ def _default_roster() -> List[AgentSpec]:
         AgentSpec(
             id="performance_analyst", description="Normalize touchpoint/conversation/content metrics.",
             capabilities=["performance_analysis"], risk=RiskClass.LOW, cost=CostClass.NONE,
+            implemented=True,
         ),
         AgentSpec(
             id="allocation", description="Dynamically reallocate the daily touchpoint budget by outcome.",
@@ -134,6 +135,7 @@ def _default_roster() -> List[AgentSpec]:
         AgentSpec(
             id="mission_evaluator", description="Score completed missions; feed learning back to ORELIUS.",
             capabilities=["mission_evaluation"], risk=RiskClass.LOW, cost=CostClass.LOW,
+            implemented=True,
         ),
     ]
 

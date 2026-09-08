@@ -72,6 +72,25 @@ class Prospect(Base):
     last_inbound_at = Column(DateTime, nullable=True)
 
 
+class TouchpointEvent(Base):
+    """One recorded meaningful touchpoint and its outcome (directive §17, §18, §42).
+
+    The event log the analytics roll up into the North-Star ratio and the per-action
+    performance signal the allocation engine consumes. Additive."""
+    __tablename__ = "touchpoint_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    day = Column(String(10), index=True)                  # YYYY-MM-DD (PT)
+    brand = Column(String(16), index=True)
+    platform = Column(String(24), nullable=True)
+    action = Column(String(32), index=True)               # TouchpointAction value
+    outcome = Column(String(16), index=True, default="meaningful")  # none|meaningful|qualified
+    prospect_id = Column(String(80), nullable=True, index=True)
+    mission_id = Column(String(64), nullable=True, index=True)
+    cost_usd = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class AllocationSnapshot(Base):
     """One day's touchpoint allocation plan (directive §17, §18). Additive.
 

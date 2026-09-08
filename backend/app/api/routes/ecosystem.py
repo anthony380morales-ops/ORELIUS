@@ -26,6 +26,7 @@ from ...orchestration.conversation_engine import conversation_engine
 from ...orchestration.prospects import prospect_memory
 from ...orchestration.compliance import compliance_engine
 from ...orchestration.allocation import allocation_engine
+from ...orchestration.analytics import analytics
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -439,10 +440,13 @@ async def allocation_plan(
     user: str = Depends(get_current_user),
 ):
     """Compute today's touchpoint allocation across brands and action types (targets,
-    not quotas). Paused brands get zero. persist=true stores a snapshot."""
+    not quotas). Paused brands get zero. persist=true stores a snapshot; performance
+    weights (when any outcomes exist) bend the split toward what actually works."""
+    weights = await analytics.performance_provider(db)
+    perf = (lambda b: weights.get(b.value)) if weights else None
     if persist:
-        return await allocation_engine.plan_and_store(db, total=total)
-    return await allocation_engine.plan_day(db, total=total)
+        return await allocation_engine.plan_and_store(db, total=total, perf_provider=perf)
+    return await allocation_engine.plan_day(db, total=total, perf_provider=perf)
 
 
 @router.get("/ecosystem/allocation/latest")
@@ -454,3 +458,51 @@ async def allocation_latest(
     if not snap:
         return {"snapshot": None}
     return {"snapshot": snap}
+
+
+# ------------------------------------------------ performance + analytics (Phase 11)
+@router.post("/ecosystem/analytics/touchpoint")
+async def record_touchpoint(
+    brand: str = Body(..., embed=True),
+    action: str = Body(..., embed=True),
+    outcome: str = Body("meaningful", embed=True),
+    platform: Optional[str] = Body(None, embed=True),
+    prospect_id: Optional[str] = Body(None, embed=True),
+    mission_id: Optional[str] = Body(None, embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Record one meaningful touchpoint + its outcome (none|meaningful|qualified)."""
+    b = _brand_or_400(brand)
+    return await analytics.record_touchpoint(
+        db, brand=b.value, action=action, outcome=outcome,
+        platform=platform or "", prospect_id=prospect_id, mission_id=mission_id)
+
+
+@router.get("/ecosystem/analytics/rollup")
+async def analytics_rollup(
+    brand: Optional[str] = None,
+    day: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """North-Star ratio + per-action breakdown (optionally scoped to a brand/day)."""
+    b = _brand_or_400(brand).value if brand else None
+    return await analytics.rollup(db, brand=b, day=day)
+
+
+@router.post("/ecosystem/analytics/evaluate/{mission_id}")
+async def analytics_evaluate(
+    mission_id: str,
+    qualified: int = Body(0, embed=True),
+    touchpoints: int = Body(0, embed=True),
+    note: str = Body("", embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Score a completed mission and record the evaluation on its row."""
+    out = await analytics.evaluate_mission(db, mission_id, qualified=qualified,
+                                           touchpoints=touchpoints, note=note)
+    if not out.get("ok"):
+        raise HTTPException(status_code=404, detail=out.get("reason", "not found"))
+    return out
