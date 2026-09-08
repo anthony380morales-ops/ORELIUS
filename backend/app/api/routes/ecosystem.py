@@ -28,6 +28,7 @@ from ...orchestration.compliance import compliance_engine
 from ...orchestration.allocation import allocation_engine
 from ...orchestration.analytics import analytics
 from ...orchestration.optimizer import optimizer, TUNABLES
+from ...orchestration.dashboard import dashboard
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -564,3 +565,15 @@ async def optimizer_auto(
     """One optimization cycle: roll back any regression, recommend, and (if apply)
     apply the safe within-bound recommendations."""
     return await optimizer.auto_tune(db, apply=bool(apply))
+
+
+# ------------------------------------------------------ North-Star dashboard (Phase 13)
+@router.get("/ecosystem/dashboard")
+async def ecosystem_dashboard(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """One consolidated, read-only snapshot of the whole ecosystem, centered on the
+    North Star. Composes queue, allocation, performance, flags, approvals, handoffs,
+    optimizer, executor health, and agent coverage."""
+    return await dashboard.snapshot(db)

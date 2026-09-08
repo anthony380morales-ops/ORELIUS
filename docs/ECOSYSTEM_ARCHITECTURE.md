@@ -94,7 +94,7 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 | 10 | Touchpoint allocation engine (adaptive apportionment, exploration floor, kill-switch-aware, snapshotted) | ✅ **this change** (11/11 tests) |
 | 11 | Performance feedback + analytics (touchpoint log, North-Star rollup, perf signal → allocation, mission evaluation, conversation loop) | ✅ **this change** (9/9 tests) |
 | 12 | Adaptive optimization governor — whitelisted/bounded params only, escalate big steps, reversible, North-Star rollback gate | ✅ **this change** (11/11 tests) |
-| 13 | North-Star dashboard | ⏳ |
+| 13 | North-Star dashboard (one consolidated read-only snapshot: metric, queue, allocation, performance, flags, approvals, handoffs, optimizer, executor health, agent coverage) | ✅ **this change** (4/4 tests) |
 | 14 | End-to-end simulation acceptance test (§69) | ⏳ |
 | 15 | Production activation (per-provider, credential-gated) | ⏳ |
 
