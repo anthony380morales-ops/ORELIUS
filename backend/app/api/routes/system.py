@@ -121,6 +121,31 @@ async def daily_report(db: AsyncSession = Depends(get_db)):
     except Exception as e:  # noqa: BLE001
         logger.debug(f"daily-report memory check failed: {e}")
 
+    # --- Autonomous ecosystem: North-Star status (mandatory daily line) ---
+    # Compact, read-only snapshot of the multi-agent growth engine. Guarded so a
+    # slow/absent source never breaks the morning report.
+    ecosystem = {"available": False}
+    try:
+        from ...orchestration.dashboard import dashboard
+        snap = await dashboard.snapshot(db)
+        ns = snap.get("north_star", {})
+        ecosystem = {
+            "available": True,
+            "mode": snap.get("mode"),
+            "any_paused": snap.get("any_paused", False),
+            "north_star_per_1k": ns.get("value", 0.0),
+            "touchpoints": ns.get("touchpoints", 0),
+            "qualified": ns.get("qualified", 0),
+            "target": ns.get("daily_touchpoint_target", 0),
+            "target_progress": ns.get("target_progress", 0.0),
+            "queue_depth": (snap.get("queue") or {}).get("queue_depth", 0),
+            "pending_approvals": (snap.get("pending") or {}).get("approvals", 0),
+            "pending_handoffs": (snap.get("pending") or {}).get("handoffs", 0),
+            "agents": snap.get("agents", {}),
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"daily-report ecosystem snapshot failed: {e}")
+
     # --- Assemble the spoken report ---
     ticks = {"PASS": "✅", "FAIL": "❌", "STALE": "⚠️", "NOT CONFIGURED": "⚙️", "No run yet": "—"}
     tick = ticks.get(finance["status"], "—")
@@ -157,6 +182,25 @@ async def daily_report(db: AsyncSession = Depends(get_db)):
             brief_text = brief_text[:2600].rstrip() + " …"
         lines += ["**NXG Funnel Briefing:**", brief_text, ""]
 
+    # Autonomous ecosystem status — mandatory daily line.
+    if ecosystem.get("available"):
+        mode = (ecosystem.get("mode") or "simulation").upper()
+        paused = " · ⏸ PAUSED" if ecosystem.get("any_paused") else ""
+        ag = ecosystem.get("agents", {})
+        eco_tick = "⏸" if ecosystem.get("any_paused") else "🟢"
+        lines += [
+            "**Autonomous Growth Engine:**",
+            f"- {eco_tick} Mode: {mode}{paused}",
+            f"- North Star: {ecosystem['north_star_per_1k']} qualified / 1k touchpoints "
+            f"({ecosystem['qualified']} qualified, {ecosystem['touchpoints']} touchpoints "
+            f"· {int(ecosystem['target_progress'] * 100)}% of {ecosystem['target']} daily target)",
+            f"- Queue: {ecosystem['queue_depth']} ready · "
+            f"{ecosystem['pending_approvals']} awaiting approval · "
+            f"{ecosystem['pending_handoffs']} awaiting you (handoff)",
+            f"- Agents online: {ag.get('implemented', 0)}/{ag.get('total', 0)}",
+            "",
+        ]
+
     lines += [
         "**Memory:**",
         f"- {memory['shared_events']} shared events · {memory['reports']} reports · {memory['conversations']} conversations on record",
@@ -169,6 +213,7 @@ async def daily_report(db: AsyncSession = Depends(get_db)):
         "system_health": system_health,
         "components": components,
         "automation": {"finance_brief": finance, "nxg_brief": nxg},
+        "ecosystem": ecosystem,
         "memory": memory,
         "report_markdown": "\n".join(lines),
     }
