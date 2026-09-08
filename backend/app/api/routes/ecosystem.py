@@ -18,7 +18,7 @@ from ...core.auth import get_current_user
 from ...utils.logger import logger
 from ...orchestration.mission import validate_mission, MissionStatus
 from ...orchestration.mission_queue import mission_queue
-from ...orchestration.adapters import athena_adapter
+from ...orchestration.adapters import athena_adapter, higgbot_adapter
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
 router = APIRouter()
@@ -118,6 +118,54 @@ async def athena_health(
 @router.get("/ecosystem/athena/capabilities")
 async def athena_capabilities(user: str = Depends(get_current_user)):
     return await athena_adapter.capabilities()
+
+
+# --------------------------------------------------------------- HIGGBOT (creative)
+@router.post("/ecosystem/higgbot/creative")
+async def submit_higgbot_creative(
+    packet: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Validate a creative mission → build the brief → (attempt) produce via HIGGBOT.
+
+    The creative path is ORELIUS → ATHENA → HIGGBOT; in simulation/dry-run or when
+    HIGGBOT_PAUSE is set, the proposed job + a $0 placeholder asset are returned
+    without dispatching anything real.
+    """
+    try:
+        mp = validate_mission(packet)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"invalid mission packet: {e}")
+
+    row = await mission_queue.enqueue(db, mp, executor="higgbot")
+    if row.status == MissionStatus.BLOCKED.value:
+        return {"mission": _mission_view(row),
+                "submit": {"ok": False, "reason": "compliance_not_approved"}}
+
+    submit = await higgbot_adapter.submit_mission(db, mp)
+    if not submit.get("ok"):
+        row.status = MissionStatus.BLOCKED.value
+    elif submit.get("simulated"):
+        row.status = MissionStatus.COMPLETED.value      # simulation completes logically
+    elif submit.get("dispatched"):
+        row.status = MissionStatus.RUNNING.value         # ATHENA/HIGGBOT work async
+    row.result = submit
+    await db.flush()
+    return {"mission": _mission_view(row), "submit": submit}
+
+
+@router.get("/ecosystem/higgbot/health")
+async def higgbot_health(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    return await higgbot_adapter.health(db)
+
+
+@router.get("/ecosystem/higgbot/capabilities")
+async def higgbot_capabilities(user: str = Depends(get_current_user)):
+    return await higgbot_adapter.capabilities()
 
 
 @router.get("/ecosystem/queue/stats")

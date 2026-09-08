@@ -22,6 +22,7 @@ from ...utils.logger import logger
 from ...core import athena as athena_core
 from ...core.shared_memory import shared_memory
 from ..mission import MissionPacket, Objective, Platform
+from ..creative import build_brief, to_higgbot_job
 from ..flags import flags, SocialMode
 
 ATHENA_CAPABILITIES = [
@@ -43,12 +44,20 @@ def translate(packet: MissionPacket) -> Dict:
     phase rather than a forced/bypassed action.
     """
     obj = packet.objective
+
+    # Pure creative mission (make an asset, no publish objective) → route the
+    # HIGGBOT creative brief through ATHENA's design endpoint (directive §41: reuse
+    # the creative contract; no duplicate design logic here).
+    if obj not in (Objective.CONTENT_PUBLISH, Objective.RESEARCH) \
+            and packet.creative and packet.creative.required:
+        job = to_higgbot_job(build_brief(packet))
+        return {"kind": "design", "action": None, "task": job.get("task"),
+                "request": job["request"], "creative": job}
+
     if obj == Objective.CONTENT_PUBLISH:
         kind, action = "instagram_post", "once"
     elif obj == Objective.RESEARCH:
         kind, action = "instagram_post", "research"
-    elif packet.creative and packet.creative.required:
-        kind, action = "design", None
     elif packet.platform == Platform.INTERNAL:
         kind, action = None, None
     else:
@@ -113,7 +122,8 @@ class AthenaAdapter:
         # Live: ATHENA has a direct endpoint for this kind → dispatch via the bridge.
         if job["kind"]:
             event = await athena_core.enqueue_design_request(
-                db, request=job["request"], kind=job["kind"], action=job["action"],
+                db, request=job["request"], kind=job["kind"],
+                action=job.get("action"), task=job.get("task"),
             )
             return {"ok": True, "simulated": False, "mode": mode.value,
                     "mission_id": packet.mission_id,

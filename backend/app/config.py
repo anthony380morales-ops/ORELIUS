@@ -138,6 +138,17 @@ class Settings(BaseSettings):
     # carrying the whole package. Master's choice: 3 solo reels.
     hot_topic_solo_reels: bool = True
 
+    # --- HIGGBOT creative contract (Phase 4) ---
+    # ORELIUS never talks to HIGGBOT directly. Creative missions flow ORELIUS ->
+    # ATHENA -> HIGGBOT (HIGGBOT's provider-agnostic router picks the cheapest
+    # capable provider, escalating only within the tier's budget cap). These are
+    # per-asset budget ceilings by quality tier, in USD; the real spend is decided
+    # and metered inside HIGGBOT. draft = cheapest/placeholder-friendly, prod =
+    # publish-ready, hero = flagship. A brief may never exceed its tier's cap.
+    creative_budget_draft_usd: float = 0.25
+    creative_budget_prod_usd: float = 2.00
+    creative_budget_hero_usd: float = 8.00
+
     # Telegram (optional — leave blank to run ORELIUS without the Telegram bot)
     telegram_bot_token: str = ""
     telegram_allowed_users: str = ""  # Comma-separated user IDs allowed to log in
