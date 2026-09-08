@@ -20,3 +20,7 @@ from .social_opportunity import (  # noqa: F401
 from .conversation_strategist import (  # noqa: F401
     conversation_strategist, ConversationStrategistAgent, ConversationDecision,
 )
+from .compliance_risk import (  # noqa: F401
+    compliance_risk, ComplianceRiskAgent, ComplianceVerdict,
+    scan_prohibited, scan_advice,
+)

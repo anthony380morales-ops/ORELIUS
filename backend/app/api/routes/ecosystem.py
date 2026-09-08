@@ -24,6 +24,7 @@ from ...orchestration.planner import intelligence_planner
 from ...orchestration.agents import audience_intelligence, social_opportunity
 from ...orchestration.conversation_engine import conversation_engine
 from ...orchestration.prospects import prospect_memory
+from ...orchestration.compliance import compliance_engine
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -394,3 +395,35 @@ async def conversation_stop(
     """Honor an opt-out: mark the prospect do-not-contact (durable)."""
     ok = await prospect_memory.mark_do_not_contact(db, prospect_id)
     return {"ok": ok, "prospect_id": prospect_id}
+
+
+# ---------------------------------------------------- compliance gate (Phase 9)
+@router.post("/ecosystem/compliance/review/{mission_id}")
+async def compliance_review_mission(
+    mission_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Mandatory reviewer: review a held mission and move it — APPROVED releases it
+    to the queue, NEEDS_HUMAN escalates it, BLOCKED keeps it held with reasons."""
+    out = await compliance_engine.review_mission_row(db, mission_id)
+    if not out.get("ok"):
+        raise HTTPException(status_code=404, detail=out.get("reason", "not found"))
+    return out
+
+
+@router.post("/ecosystem/compliance/check")
+async def compliance_check(
+    message: Optional[str] = Body(None, embed=True),
+    packet: Optional[dict] = Body(None, embed=True),
+    user: str = Depends(get_current_user),
+):
+    """Stateless review of an ad-hoc message or mission packet (nothing persisted)."""
+    if message is not None:
+        return {"kind": "message", "verdict": compliance_engine.review_message(message)}
+    if packet is not None:
+        try:
+            return {"kind": "mission", "verdict": compliance_engine.review_packet(packet)}
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=422, detail=f"invalid packet: {e}")
+    raise HTTPException(status_code=400, detail="provide 'message' or 'packet'")

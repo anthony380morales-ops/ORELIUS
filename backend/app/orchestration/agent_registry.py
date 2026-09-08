@@ -120,6 +120,7 @@ def _default_roster() -> List[AgentSpec]:
         AgentSpec(
             id="compliance_risk", description="Mandatory reviewer. When in doubt, block/escalate.",
             capabilities=["compliance_review"], risk=RiskClass.HIGH, cost=CostClass.LOW,
+            required_tools=["messaging_policy"], implemented=True,
         ),
         AgentSpec(
             id="performance_analyst", description="Normalize touchpoint/conversation/content metrics.",

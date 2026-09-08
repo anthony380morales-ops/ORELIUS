@@ -90,7 +90,7 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 | 6 | Economic intelligence + financial impact agents + intelligence→mission planner (reuse `finance_intel`/`hot_topic`) | ✅ **this change** (8/8 tests) |
 | 7 | Audience-intelligence (reuses live NXG lead concerns) + social-opportunity agents (compliant slate, live discovery gated) | ✅ **this change** (8/8 tests) |
 | 8 | Conversation intelligence (state machine, strategist w/ `--`-safe drafts, prospect memory, human handoff) | ✅ **this change** (12/12 tests) |
-| 9 | Compliance/risk engine (mandatory reviewer) | ⏳ |
+| 9 | Compliance/risk engine (mandatory reviewer: releases / escalates / blocks held missions; reviews messages) | ✅ **this change** (12/12 tests) |
 | 10 | Touchpoint allocation engine (adaptive, outcome-driven) | ⏳ |
 | 11 | Performance feedback + analytics tables | ⏳ |
 | 12 | Adaptive optimization (params/prompts/routing only — never source) | ⏳ |
