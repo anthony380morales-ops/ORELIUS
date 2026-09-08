@@ -43,6 +43,35 @@ class Mission(Base):
     expires_at = Column(DateTime, nullable=True, index=True)
 
 
+class Prospect(Base):
+    """Persistent conversation memory for one prospect (directive §19).
+
+    One row per prospect per brand. Recent turns are kept inline (bounded JSON) so
+    the conversation survives across sessions and the strategist can reason over
+    history without a join. Additive, non-destructive."""
+    __tablename__ = "prospects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prospect_id = Column(String(80), unique=True, index=True, nullable=False)
+    brand = Column(String(16), index=True)
+    platform = Column(String(24), index=True)
+    handle = Column(String(120), nullable=True)          # external handle / thread ref
+
+    stage = Column(String(24), index=True, default="new")
+    concern = Column(String(120), nullable=True)          # their critical savings point
+    score = Column(Float, default=0.0)                    # qualification signal 0-1
+
+    consent = Column(Boolean, default=False)              # invited/permitted to DM
+    do_not_contact = Column(Boolean, default=False, index=True)
+
+    turns = Column(JSON, default=list)                    # bounded recent [{role,text,ts}]
+    notes = Column(JSON, default=dict)
+
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_inbound_at = Column(DateTime, nullable=True)
+
+
 class SystemFlag(Base):
     __tablename__ = "system_flags"
 

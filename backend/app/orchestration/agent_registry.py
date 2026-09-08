@@ -111,6 +111,7 @@ def _default_roster() -> List[AgentSpec]:
         AgentSpec(
             id="conversation_strategist", description="Decide next best action for a conversation.",
             capabilities=["conversation_strategy", "next_action"], risk=RiskClass.HIGH, cost=CostClass.MEDIUM,
+            required_tools=["messaging_policy"], implemented=True,
         ),
         AgentSpec(
             id="content_strategist", description="Transform intelligence into content missions.",

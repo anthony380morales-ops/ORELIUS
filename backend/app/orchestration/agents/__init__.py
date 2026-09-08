@@ -17,3 +17,6 @@ from .audience_intelligence import (  # noqa: F401
 from .social_opportunity import (  # noqa: F401
     social_opportunity, SocialOpportunityAgent, SocialOpportunity, opportunity_slate,
 )
+from .conversation_strategist import (  # noqa: F401
+    conversation_strategist, ConversationStrategistAgent, ConversationDecision,
+)

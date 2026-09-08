@@ -22,6 +22,8 @@ from ...orchestration.adapters import athena_adapter, higgbot_adapter, lucius_ad
 from ...orchestration.control import control_surface, SCOPE_TO_FLAG
 from ...orchestration.planner import intelligence_planner
 from ...orchestration.agents import audience_intelligence, social_opportunity
+from ...orchestration.conversation_engine import conversation_engine
+from ...orchestration.prospects import prospect_memory
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -343,3 +345,52 @@ async def social_opportunities(
     opps = await social_opportunity.discover(db, _brand_or_400(brand))
     return {"brand": _brand_or_400(brand).value,
             "opportunities": [o.model_dump(mode="json") for o in opps]}
+
+
+# ----------------------------------------------- conversation intelligence (Phase 8)
+@router.post("/ecosystem/conversation/inbound")
+async def conversation_inbound(
+    prospect_id: str = Body(..., embed=True),
+    message: str = Body(..., embed=True),
+    brand: str = Body("NXG", embed=True),
+    platform: str = Body("instagram", embed=True),
+    handle: Optional[str] = Body(None, embed=True),
+    concern: Optional[str] = Body(None, embed=True),
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Process one inbound message: persist it, decide the next action + a
+    policy-safe draft (never sent here), advance the stored stage, and alert LUCIUS
+    on a human-handoff signal. The draft can never contain the forbidden sequence."""
+    b = _brand_or_400(brand)
+    return await conversation_engine.handle_inbound(
+        db, prospect_id=prospect_id, brand=b.value, platform=platform,
+        message=message, handle=handle, concern=concern)
+
+
+@router.get("/ecosystem/conversation/{prospect_id}")
+async def conversation_get(
+    prospect_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    row = await prospect_memory.get(db, prospect_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="prospect not found")
+    return {
+        "prospect_id": row.prospect_id, "brand": row.brand, "platform": row.platform,
+        "stage": row.stage, "concern": row.concern, "score": row.score,
+        "consent": row.consent, "do_not_contact": row.do_not_contact,
+        "turns": row.turns or [],
+    }
+
+
+@router.post("/ecosystem/conversation/{prospect_id}/stop")
+async def conversation_stop(
+    prospect_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Honor an opt-out: mark the prospect do-not-contact (durable)."""
+    ok = await prospect_memory.mark_do_not_contact(db, prospect_id)
+    return {"ok": ok, "prospect_id": prospect_id}
