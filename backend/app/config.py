@@ -65,6 +65,45 @@ class Settings(BaseSettings):
     persona_reflect_max_tokens: int = 700  # tight cap for the cheap reflection call
     persona_context_char_cap: int = 1400   # cap the profile block injected into chat
 
+    # === Autonomous ecosystem orchestration (multi-agent social growth engine) ===
+    # ORELIUS = executive brain; ATHENA = social ops; HIGGBOT = creative engine;
+    # LUCIUS = owner interface. All endpoints/tokens are placeholders — set real
+    # values in the environment; never commit secrets.
+    athena_base_url: str = "http://127.0.0.1:8787"
+    athena_api_token: str = ""
+    higgbot_mcp_path: str = ""            # path/command to higgbot's MCP stdio server
+    higgbot_api_url: str = ""             # optional HTTP surface if exposed
+    lucius_base_url: str = ""
+    lucius_api_token: str = ""
+    manychat_api_token: str = ""
+    manychat_base_url: str = "https://api.manychat.com"
+    n8n_base_url: str = ""
+    n8n_api_token: str = ""
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_access_token: str = ""
+
+    # Run mode — SAFETY DEFAULT is 'simulation' (no real messages/publishing/spend).
+    # Values: simulation | dry_run | live.
+    social_automation_mode: str = "simulation"
+    social_daily_touchpoint_target: int = 1050
+    social_daily_budget_usd: float = 25.0
+    # Initial per-brand touchpoint baselines (targets, NOT quotas; the allocation
+    # engine learns and reallocates from these).
+    ibc_touchpoint_baseline: int = 600   # Infinite Blueprint Collective (Instagram)
+    nxg_touchpoint_baseline: int = 430   # NXG Life Group (Facebook)
+
+    # Kill switches (durable overrides live in the system_flags table; these are the
+    # boot defaults). Any True immediately blocks the matching outbound actions.
+    system_pause: bool = False
+    messaging_pause: bool = False
+    publishing_pause: bool = False
+    outbound_pause: bool = False
+    nxg_pause: bool = False
+    ibc_pause: bool = False
+    higgbot_pause: bool = False
+    athena_pause: bool = False
+
     # --- Chat memory retention ---
     # ORELIUS holds the conversation across app closes for this many days, then the
     # older messages auto-expire (a fresh holding period rolls forward).
