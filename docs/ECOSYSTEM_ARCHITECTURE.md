@@ -95,7 +95,7 @@ Agents cooperate through **typed contracts (mission packets)**, not shared promp
 | 11 | Performance feedback + analytics (touchpoint log, North-Star rollup, perf signal → allocation, mission evaluation, conversation loop) | ✅ **this change** (9/9 tests) |
 | 12 | Adaptive optimization governor — whitelisted/bounded params only, escalate big steps, reversible, North-Star rollback gate | ✅ **this change** (11/11 tests) |
 | 13 | North-Star dashboard (one consolidated read-only snapshot: metric, queue, allocation, performance, flags, approvals, handoffs, optimizer, executor health, agent coverage) | ✅ **this change** (4/4 tests) |
-| 14 | End-to-end simulation acceptance test (§69) | ⏳ |
+| 14 | End-to-end simulation acceptance gate (§69) — credential-free full-loop dry run, 18 safety checks | ✅ **this change** (18/18 checks) |
 | 15 | Production activation (per-provider, credential-gated) | ⏳ |
 
 Each later phase is additive, preserves existing behavior, and ships with tests. Phases 3–5 and 15 require owner-provided credentials/endpoints (ATHENA token, HIGGBOT MCP path, LUCIUS URL, Manychat/Meta/n8n) — the adapters ship with a simulation fallback so the pipeline is testable before any real credential exists.

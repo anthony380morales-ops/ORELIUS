@@ -29,6 +29,7 @@ from ...orchestration.allocation import allocation_engine
 from ...orchestration.analytics import analytics
 from ...orchestration.optimizer import optimizer, TUNABLES
 from ...orchestration.dashboard import dashboard
+from ...orchestration.acceptance import acceptance_harness
 from ...orchestration.mission import Brand
 from ...orchestration.flags import flags, PAUSE_FLAGS
 
@@ -577,3 +578,16 @@ async def ecosystem_dashboard(
     North Star. Composes queue, allocation, performance, flags, approvals, handoffs,
     optimizer, executor health, and agent coverage."""
     return await dashboard.snapshot(db)
+
+
+# ------------------------------------------ end-to-end simulation acceptance (Phase 14)
+@router.post("/ecosystem/acceptance/run")
+async def acceptance_run(
+    db: AsyncSession = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """Run the full end-to-end simulation acceptance gate (§69). Credential-free and
+    side-effect-free: seeds synthetic intelligence, drives the whole loop, and
+    asserts every safety invariant (no real dispatch, no forbidden dashes, compliance
+    gating, kill switches). Returns a checklist."""
+    return await acceptance_harness.run(db)
