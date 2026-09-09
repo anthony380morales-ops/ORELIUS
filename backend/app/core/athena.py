@@ -31,8 +31,14 @@ from .shared_memory import shared_memory
 # What kind of ATHENA work a request maps to (decides which endpoint the bridge hits).
 ATHENA_KINDS = ["design", "instagram_post", "website"]
 
-# Instagram pipeline actions (POST /jobs) — only relevant for kind=instagram_post.
+# Instagram pipeline actions (POST /jobs) — the autopilot modes the athena_design
+# TOOL may pick (kept as-is so the brain never chooses a publish action for design).
 ATHENA_ACTIONS = ["once", "autopilot", "batch", "research", "brief"]
+
+# Actions the bridge may carry to ATHENA's /jobs — the autopilot modes PLUS "publish"
+# (the account-aware handler that publishes ORELIUS-SUPPLIED content). Normalization
+# must let "publish" through; only truly unknown actions fall back to "once".
+_DISPATCH_ACTIONS = set(ATHENA_ACTIONS) | {"publish"}
 
 # Design-engine task types (POST /design) — optional hint for kind=design.
 ATHENA_DESIGN_TASKS = [
@@ -116,7 +122,7 @@ def _normalize_kind(kind: Optional[str]) -> str:
 
 def _normalize_action(action: Optional[str]) -> str:
     action = (action or settings.athena_default_action or "once").strip().lower()
-    return action if action in ATHENA_ACTIONS else "once"
+    return action if action in _DISPATCH_ACTIONS else "once"
 
 
 async def enqueue_design_request(
