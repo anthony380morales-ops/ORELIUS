@@ -126,6 +126,7 @@ async def enqueue_design_request(
     task: Optional[str] = None,
     action: Optional[str] = None,
     days: Optional[int] = None,
+    meta_extra: Optional[Dict] = None,
 ) -> Dict:
     """Record a `design_request` in shared memory for the ATHENA bridge to pick up.
 
@@ -150,6 +151,12 @@ async def enqueue_design_request(
         t = str(task).strip().lower()
         if t in ATHENA_DESIGN_TASKS:
             meta["task"] = t
+
+    # Optional routing hints (e.g. brand + target account) so ATHENA's configured
+    # roadmap can send each package to the right page. Never overwrites core keys.
+    if meta_extra:
+        for k, v in meta_extra.items():
+            meta.setdefault(k, v)
 
     try:
         event = await shared_memory.remember(
