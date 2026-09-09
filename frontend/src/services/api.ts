@@ -101,7 +101,11 @@ export const chatApi = {
     const response = await api.post(
       '/chat',
       { message, source, attachments: attachments && attachments.length ? attachments : undefined },
-      { timeout: 90000 }, // vision/file analysis can take longer
+      // Web-searched finance briefings + hot-topic compile (which runs a live search
+      // AND a second model call) are slow, and a cold Render free instance adds ~50s.
+      // Give these heavy paths room so the client doesn't abort a request that is
+      // still working (which surfaced as a false "momentary fault").
+      { timeout: 180000 },
     )
     return response.data
   },
