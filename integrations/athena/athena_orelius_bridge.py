@@ -71,8 +71,15 @@ JOB_TIMEOUT = int(_env("BRIDGE_JOB_TIMEOUT", "1800") or "1800")  # 30 min
 HEARTBEAT_SECONDS = int(_env("BRIDGE_HEARTBEAT_SECONDS", "600") or "600")  # 10 min
 STATE_FILE = Path(_env("BRIDGE_STATE_FILE", "") or (Path(__file__).resolve().parent / "athena_bridge_state.json"))
 
-# ATHENA's /jobs API accepts these actions; anything else is coerced to "once".
-ATHENA_ACTIONS = {"once", "batch", "autopilot", "research", "brief"}
+# ATHENA's /jobs API actions. "publish" is the account-aware handler that publishes
+# ORELIUS-SUPPLIED content to a specific account (accountId + content in the body);
+# the others are ATHENA's own autopilot modes. An unknown action is coerced to "once".
+ATHENA_ACTIONS = {"once", "batch", "autopilot", "research", "brief", "publish"}
+
+
+class PermanentDispatchError(Exception):
+    """ATHENA rejected the request with a 4xx — retrying won't help (e.g. it doesn't
+    support the 'publish' action yet). Skip it instead of looping forever."""
 
 _ORELIUS_HEADERS = {"X-Shared-Secret": ORELIUS_SECRET, "Content-Type": "application/json"}
 _ATHENA_HEADERS = {"Authorization": f"Bearer {ATHENA_TOKEN}", "Content-Type": "application/json"}
@@ -158,7 +165,12 @@ def _post_athena(path: str, body: dict) -> str | None:
         if r.status_code == 409:
             log(f"ATHENA busy (409) on {path} — will retry this request next poll")
             return None
+        if 400 <= r.status_code < 500:
+            # permanent: bad request / unsupported action → don't retry forever
+            raise PermanentDispatchError(f"{r.status_code}: {r.text[:200]}")
         log(f"ATHENA POST {path} -> {r.status_code}: {r.text[:300]}")
+    except PermanentDispatchError:
+        raise
     except Exception as e:
         log(f"ATHENA unreachable ({e}) — is she running on {ATHENA_BASE_URL}?")
     return None
@@ -175,10 +187,16 @@ def _routing(meta: dict, brief: str) -> dict:
     to publish. We forward them all so ATHENA's configured handler can route + use
     them. (Unknown fields are harmless if ATHENA ignores them.)"""
     r: dict = {}
-    for k in ("brand", "target", "account", "publish", "format"):
+    for k in ("accountId", "brandId", "brand", "platform", "target", "account",
+              "publish", "format"):
         if meta.get(k) is not None:
             r[k] = meta[k]
-    if brief:
+    struct = meta.get("content")
+    if isinstance(struct, dict):
+        r["content"] = struct         # structured post ORELIUS compiled (caption/facts/…)
+        if brief:
+            r["brief"] = brief        # human-readable version of the same
+    elif brief:
         r["content"] = brief          # the exact post ORELIUS compiled
         r["brief"] = brief            # alias — whichever key ATHENA reads
     return r
@@ -329,7 +347,17 @@ def handle_request(ev: dict) -> None:
     req_id = ev.get("id")
 
     log(f"design_request #{req_id}: kind={kind} — dispatching to ATHENA")
-    job_id = athena_dispatch(kind, brief, meta)
+    try:
+        job_id = athena_dispatch(kind, brief, meta)
+    except PermanentDispatchError as e:
+        # ATHENA rejected it (e.g. it doesn't support the 'publish' action yet).
+        # Report it once and move on — do NOT retry forever.
+        action = meta.get("action")
+        note = (f"ATHENA rejected the {kind} job ({e}). If action='{action}', ATHENA's "
+                f"account-aware publish handler may not be live yet.")
+        log(f"design_request #{req_id}: {note}")
+        write_result(note, {"request_id": req_id, "kind": kind, "state": "rejected"})
+        return   # caller advances last_id — skip, don't loop
     if not job_id:
         raise RuntimeError("job not accepted")  # leave unprocessed; retried next poll
 

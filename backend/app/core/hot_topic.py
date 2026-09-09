@@ -34,28 +34,39 @@ from . import athena
 # format, and destination (directive §22 — brands never share a voice). ATHENA's
 # stored roadmap holds the exact publishing routing for each.
 def _brand_specs() -> Dict[str, Dict]:
+    # The action ATHENA runs to publish ORELIUS-SUPPLIED content (contract).
+    publish_action = getattr(settings, "athena_content_action", "publish")
     return {
         "ibc": {
             "name": "ibluezcluezflow",
+            "account_id": getattr(settings, "ibluezcluezflow_account_id", "ibluezcluezflow"),
+            "brand_id": getattr(settings, "ibluezcluezflow_brand_id", "IBC"),
+            "platform": "instagram",
             "guidelines": settings.ibluezcluezflow_guidelines,
             "accounts": getattr(settings, "ibluezcluezflow_accounts",
                                 "the ibluezcluezflow Instagram pages"),
             "format": "reel",                 # short-form Instagram reel
             "state_key": "hot_topic_package_ibc",
+            # Route through ATHENA's /jobs publish handler; accountId + format tell it
+            # WHICH account and WHICH medium. (Falls back to autopilot only if ATHENA
+            # doesn't yet support the publish action.)
             "athena_kind": "instagram_post",
-            "athena_action": "once",
+            "athena_action": publish_action,
             "solo": bool(getattr(settings, "hot_topic_solo_reels", False)),
             "target": "instagram_reels",
         },
         "nxg": {
             "name": "NXG Life Group",
+            "account_id": getattr(settings, "nxg_account_id", "nxg_life_group"),
+            "brand_id": getattr(settings, "nxg_brand_id", "NXG"),
+            "platform": "facebook",
             "guidelines": getattr(settings, "nxg_facebook_guidelines", ""),
             "accounts": getattr(settings, "nxg_facebook_accounts",
                                 "the NXG Life Group Facebook page"),
             "format": "facebook_post",        # a Facebook feed post (not a reel)
             "state_key": "hot_topic_package_nxg",
-            "athena_kind": "design",          # ATHENA renders + publishes per NXG roadmap
-            "athena_action": None,
+            "athena_kind": "instagram_post",  # same /jobs publish handler; accountId routes
+            "athena_action": publish_action,
             "solo": False,                    # one consolidated Facebook post
             "target": "facebook_page",
         },
@@ -264,8 +275,25 @@ class HotTopicReels:
                 return {"ok": False, "reason": res.get("reason", "no_package"), "brand": brand}
             package = res["package"]
 
-        meta_extra = {"brand": spec["name"], "target": spec["target"], "publish": True,
-                      "format": spec["format"], "account": spec["accounts"]}
+        # Full ORELIUS -> ATHENA publish contract. ATHENA's account-aware handler reads
+        # accountId/brandId/platform/format to route to the correct account, and
+        # `content` (structured) / the brief text as the exact post to publish.
+        meta_extra = {
+            "accountId": spec["account_id"],
+            "brandId": spec["brand_id"],
+            "brand": spec["name"],
+            "platform": spec["platform"],
+            "target": spec["target"],
+            "format": spec["format"],
+            "account": spec["accounts"],
+            "publish": True,
+            "content": {
+                "caption": package.get("caption", ""),
+                "hashtags": package.get("hashtags", ""),
+                "post_idea": package.get("post_idea", ""),
+                "facts": package.get("facts", []),
+            },
+        }
         if spec["solo"]:
             count = 0
             facts = package.get("facts") or []
