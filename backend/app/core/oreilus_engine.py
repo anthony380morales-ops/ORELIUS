@@ -86,11 +86,16 @@ _DISPATCH_REEL_INTENT = re.compile(
 # STEP 1 (compile) — compile the 3 hottest facts + caption + hashtags + post idea.
 _COMPILE_POST_INTENT = re.compile(
     r"\bhot[\s-]?topic\b"
-    r"|compile.{0,25}(?:facts|data|post|hottest|briefing)"
-    r"|(?:3|three)\s+(?:best|hottest|important|top)\s+(?:facts|data|points)"
+    # build/compile/gather ... post(s)/content/caption/reel/dialogue  (natural phrasing)
+    r"|(?:compile|build|create|make|gather|draft|generate|write|prep(?:are)?|put\s+together)"
+    r"\s+.{0,30}\b(?:posts?|captions?|content|dialogue|reels?)\b"
+    r"|compile.{0,25}(?:facts|data|hottest|briefing)"
+    r"|(?:3|three|top\s+3|top\s+three)\s+(?:best|hottest|important|top|main|key)?\s*"
+    r"(?:facts|data|points|takeaways)"
     r"|construct.{0,15}(?:caption|post)|post\s+caption|viral\s+hashtags"
     r"|compress.{0,25}(?:data|facts|into)"
-    r"|hottest\s+.{0,15}(?:facts|angle|topic|niche)|post\s+idea",
+    r"|hottest\s+.{0,15}(?:facts|angle|topic|niche)|post\s+idea"
+    r"|\bthe\s+posts?\b|post\s+dialogue",
     re.IGNORECASE,
 )
 
