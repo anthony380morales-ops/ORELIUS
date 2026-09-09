@@ -133,6 +133,17 @@ class Settings(BaseSettings):
     # Where ibluezcluezflow publishes (ATHENA's roadmap holds the exact routing).
     ibluezcluezflow_accounts: str = "the ibluezcluezflow Instagram pages"
 
+    # --- ORELIUS -> ATHENA content-publish contract ---
+    # ATHENA has no brand registry yet (it is single-brand: BRAND_HANDLE=@her.iron.will).
+    # These are the canonical account/brand keys BOTH sides adopt so ATHENA's new
+    # account-aware "publish" handler can route ORELIUS-supplied content to the right
+    # account. Keep these identical to ATHENA's account-profile ids.
+    athena_content_action: str = "publish"   # the /jobs action ATHENA runs to publish SUPPLIED content
+    ibluezcluezflow_account_id: str = "ibluezcluezflow"
+    ibluezcluezflow_brand_id: str = "IBC"
+    nxg_account_id: str = "nxg_life_group"
+    nxg_brand_id: str = "NXG"
+
     # --- NXG Life Group (second brand — Facebook page) ---
     # NXG is a DISTINCT account from ibluezcluezflow: California families, warm and
     # trustworthy, plain-language life-insurance education for a Facebook feed post
