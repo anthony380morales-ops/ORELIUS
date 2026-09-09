@@ -102,6 +102,42 @@ ORELIUS with the outcome (file paths, quality score, or "scheduled to Instagram"
 Design and website jobs do **not** block on ATHENA's single-flight lock, so they
 can run anytime — even during an autopilot post run.
 
+## Publishing the RIGHT content to the RIGHT account (multi-brand)
+
+ORELIUS builds brand-tailored posts for more than one account — **ibluezcluezflow**
+(Instagram reels) and **NXG Life Group** (Facebook post) — and stamps every
+content-publish request with routing + the exact content. As of the multi-account
+fix, the bridge **forwards all of it** to ATHENA in the job body (it previously sent
+only `{"action": "once"}`, which made ATHENA run its own autopilot for its default
+connected account and ignore what ORELIUS compiled):
+
+```jsonc
+POST /jobs
+{
+  "action":  "once",
+  "brand":   "NXG Life Group",     // or "ibluezcluezflow"
+  "target":  "facebook_page",      // or "instagram_reels"
+  "publish": true,
+  "format":  "facebook_post",      // or "reel"
+  "content": "…the exact caption + facts + post idea ORELIUS compiled…",
+  "brief":   "…same text, alias key…"
+}
+```
+
+**ATHENA must read these fields.** For each account to receive the correct financial
+post, ATHENA's `/jobs` (and `/design`) handler needs to:
+
+1. Route by `brand` / `target` to the correct connected account — **not** default to
+   whatever account autopilot normally posts to (e.g. herironwill).
+2. Publish the supplied `content` / `brief` **verbatim** (subject to ATHENA's quality
+   gate + roadmap) instead of generating its own topic.
+
+If ATHENA ignores the body and just runs `action: once`, it will keep posting its own
+autopilot content to its default account — that is the symptom this fix targets on
+the ORELIUS side; the matching change is in ATHENA's job handler. The field names
+above are what the bridge sends; align ATHENA's handler to them (or tell us the names
+ATHENA expects and we'll match them exactly).
+
 ## Notes
 
 - **Best-effort & self-healing.** If ORELIUS is asleep (free-tier cold start) or

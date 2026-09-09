@@ -264,7 +264,8 @@ class HotTopicReels:
                 return {"ok": False, "reason": res.get("reason", "no_package"), "brand": brand}
             package = res["package"]
 
-        meta_extra = {"brand": spec["name"], "target": spec["target"], "publish": True}
+        meta_extra = {"brand": spec["name"], "target": spec["target"], "publish": True,
+                      "format": spec["format"], "account": spec["accounts"]}
         if spec["solo"]:
             count = 0
             facts = package.get("facts") or []

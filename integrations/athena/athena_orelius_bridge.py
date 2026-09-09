@@ -164,29 +164,54 @@ def _post_athena(path: str, body: dict) -> str | None:
     return None
 
 
+def _routing(meta: dict, brief: str) -> dict:
+    """The account-routing + content fields ATHENA needs to publish the RIGHT
+    content to the RIGHT account.
+
+    Without these, ATHENA's /jobs pipeline just runs its own autopilot for its
+    default connected account and ignores what ORELIUS actually compiled. ORELIUS
+    stamps `brand` + `target` (e.g. brand='NXG Life Group', target='facebook_page')
+    on every content-publish request, and `content` carries the exact caption/facts
+    to publish. We forward them all so ATHENA's configured handler can route + use
+    them. (Unknown fields are harmless if ATHENA ignores them.)"""
+    r: dict = {}
+    for k in ("brand", "target", "account", "publish", "format"):
+        if meta.get(k) is not None:
+            r[k] = meta[k]
+    if brief:
+        r["content"] = brief          # the exact post ORELIUS compiled
+        r["brief"] = brief            # alias — whichever key ATHENA reads
+    return r
+
+
 def athena_dispatch(kind: str, brief: str, meta: dict) -> str | None:
     """Start the right ATHENA job for this request kind. Returns a jobId to poll."""
+    routing = _routing(meta, brief)
+    tag = f" brand={routing.get('brand')} target={routing.get('target')}" if routing.get("brand") else ""
+
     if kind == "instagram_post":
         action = str(meta.get("action") or "once").lower()
         if action not in ATHENA_ACTIONS:
             action = "once"
-        body: dict = {"action": action}
+        # IMPORTANT: forward the compiled content + account routing, not just the
+        # action — otherwise ATHENA publishes its own autopilot content instead.
+        body: dict = {"action": action, **routing}
         days = meta.get("days")
         if isinstance(days, int):
             body["days"] = days
-        log(f"-> POST /jobs action={action}")
+        log(f"-> POST /jobs action={action}{tag}")
         return _post_athena("/jobs", body)
 
     if kind == "website":
-        log("-> POST /site")
-        return _post_athena("/site", {"prompt": brief})
+        log(f"-> POST /site{tag}")
+        return _post_athena("/site", {"prompt": brief, **routing})
 
     # default: design engine
-    body = {"prompt": brief}
+    body = {"prompt": brief, **routing}
     task = meta.get("task")
     if isinstance(task, str) and task:
         body["task"] = task
-    log(f"-> POST /design{f' task={task}' if task else ''}")
+    log(f"-> POST /design{f' task={task}' if task else ''}{tag}")
     return _post_athena("/design", body)
 
 
