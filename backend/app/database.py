@@ -42,14 +42,22 @@ def _build_async_db_url(raw: str):
 
 _async_url, _connect_args = _build_async_db_url(settings.database_url)
 
+# A managed free-tier Postgres (Neon) has a LOW connection ceiling and its compute
+# can be suspended, so the first connection after idle must wake it. Give asyncpg an
+# explicit connect timeout and keep the pool small so we never exhaust the ceiling.
+_connect_args.setdefault("timeout", 30)          # seconds to establish a connection
+_connect_args.setdefault("command_timeout", 60)  # seconds for a single statement
+
 # Create async engine
 engine = create_async_engine(
     _async_url,
     connect_args=_connect_args,
     echo=settings.log_level == "DEBUG",
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_pre_ping=True,       # drop dead connections instead of handing them out
+    pool_size=5,              # Neon free ceiling is small — stay well under it
+    max_overflow=5,
+    pool_recycle=1800,        # recycle connections every 30 min (avoid server-side idle cuts)
+    pool_timeout=30,
 )
 
 # Create async session factory
@@ -87,7 +95,31 @@ async def get_db():
 
 
 # Initialize database (create tables)
-async def init_db():
-    """Initialize database tables"""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def init_db(attempts: int = 6):
+    """Initialize database tables, retrying while a cold/suspended DB wakes.
+
+    A managed free-tier Postgres can be suspended after inactivity; the first
+    connect on boot then times out. Rather than crash startup (exit 3), retry with
+    exponential backoff so the compute has time to wake and accept the connection.
+    """
+    import asyncio
+    from .utils.logger import logger
+
+    last_err = None
+    for attempt in range(1, attempts + 1):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            if attempt > 1:
+                logger.info(f"Database reachable on attempt {attempt}")
+            return
+        except Exception as e:  # noqa: BLE001 - retry any connect/DDL failure on boot
+            last_err = e
+            wait = min(30, 2 ** attempt)   # 2, 4, 8, 16, 30, 30 …
+            logger.warning(
+                f"init_db attempt {attempt}/{attempts} failed "
+                f"({e.__class__.__name__}: {e}); retrying in {wait}s"
+            )
+            await asyncio.sleep(wait)
+    logger.error(f"init_db exhausted {attempts} attempts; last error: {last_err}")
+    raise last_err
