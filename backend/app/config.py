@@ -130,6 +130,28 @@ class Settings(BaseSettings):
         "CTA (follow / DM / learn more). Tie to life insurance / Infinite Banking / "
         "protect-and-grow. Viral, relevant hashtags."
     )
+    # Where ibluezcluezflow publishes (ATHENA's roadmap holds the exact routing).
+    ibluezcluezflow_accounts: str = "the ibluezcluezflow Instagram pages"
+
+    # --- NXG Life Group (second brand — Facebook page) ---
+    # NXG is a DISTINCT account from ibluezcluezflow: California families, warm and
+    # trustworthy, plain-language life-insurance education for a Facebook feed post
+    # (not a reel). ORELIUS tailors NXG posts to this voice; ATHENA publishes to the
+    # NXG Facebook page per the NXG roadmap she holds. Brands never share a voice.
+    nxg_facebook_accounts: str = "the NXG Life Group Facebook page"
+    nxg_facebook_guidelines: str = (
+        "Brand: NXG Life Group — a licensed life-insurance agency serving California "
+        "families.\n"
+        "Audience: everyday California families and individuals thinking about "
+        "protecting their loved ones.\n"
+        "Voice: warm, trustworthy, reassuring, plain language; never hype, never fear; "
+        "compliance-conscious — general education, NOT individualized financial advice; "
+        "never promise returns or invent figures.\n"
+        "Format: a Facebook FEED POST (not a reel) — a relatable hook -> the insight in "
+        "plain words -> why it matters for protecting your family -> a soft, friendly CTA "
+        "(message us / ask for a free, no-pressure quote). A few relevant, non-spammy "
+        "hashtags. Tie the economic fact to protecting the family with the right coverage."
+    )
     # ATHENA's custom design agent that renders the reel (the Master's own — not Higgsfield).
     higgbot_name: str = "higgbot"
     # How many facts ORELIUS compiles into the post package.

@@ -30,33 +30,76 @@ from .finance_intel import finance_intel
 from ..models.automation_state import AutomationState  # noqa: F401 (register table)
 from . import athena
 
-_STATE_KEY = "hot_topic_package"
+# The two accounts ORELIUS builds for. Each is a DISTINCT brand with its own voice,
+# format, and destination (directive §22 — brands never share a voice). ATHENA's
+# stored roadmap holds the exact publishing routing for each.
+def _brand_specs() -> Dict[str, Dict]:
+    return {
+        "ibc": {
+            "name": "ibluezcluezflow",
+            "guidelines": settings.ibluezcluezflow_guidelines,
+            "accounts": getattr(settings, "ibluezcluezflow_accounts",
+                                "the ibluezcluezflow Instagram pages"),
+            "format": "reel",                 # short-form Instagram reel
+            "state_key": "hot_topic_package_ibc",
+            "athena_kind": "instagram_post",
+            "athena_action": "once",
+            "solo": bool(getattr(settings, "hot_topic_solo_reels", False)),
+            "target": "instagram_reels",
+        },
+        "nxg": {
+            "name": "NXG Life Group",
+            "guidelines": getattr(settings, "nxg_facebook_guidelines", ""),
+            "accounts": getattr(settings, "nxg_facebook_accounts",
+                                "the NXG Life Group Facebook page"),
+            "format": "facebook_post",        # a Facebook feed post (not a reel)
+            "state_key": "hot_topic_package_nxg",
+            "athena_kind": "design",          # ATHENA renders + publishes per NXG roadmap
+            "athena_action": None,
+            "solo": False,                    # one consolidated Facebook post
+            "target": "facebook_page",
+        },
+    }
 
 
-def _compile_system(n: int) -> str:
+def _resolve_brand(brand: Optional[str]) -> str:
+    b = (brand or "ibc").strip().lower()
+    if b in ("nxg", "facebook", "nxg_life_group", "nxglifegroup"):
+        return "nxg"
+    return "ibc"
+
+
+def _compile_system(n: int, brand: str = "ibc") -> str:
+    spec = _brand_specs()[_resolve_brand(brand)]
+    fmt = spec["format"]
+    if fmt == "reel":
+        artifact = "one strong REEL IDEA"
+        idea_desc = "the reel/post concept in 1-3 sentences"
+    else:
+        artifact = "one strong FACEBOOK POST IDEA"
+        idea_desc = "the Facebook post concept in 1-3 sentences"
     return (
-        f"You are ORELIUS's viral content strategist for the life-insurance brand "
-        f"ibluezcluezflow. From the compiled economic intelligence provided, pick the "
+        f"You are ORELIUS's content strategist for the life-insurance brand "
+        f"{spec['name']}. From the compiled economic intelligence provided, pick the "
         f"{n} BEST and HOTTEST distinct VERIFIED facts, and compress each into ONE "
-        f"plain-language line framed for the hottest life-insurance-niche angle. Then "
-        f"construct a single scroll-stopping post CAPTION, a set of VIRAL HASHTAGS, and "
-        f"one strong REEL/POST IDEA that ties the facts together.\n\n"
+        f"plain-language line framed for this brand's audience. Then construct a single "
+        f"scroll-stopping post CAPTION, a set of relevant HASHTAGS, and {artifact} that "
+        f"ties the facts together — all in THIS brand's voice and format.\n\n"
         "HARD RULES:\n"
         "1. Use ONLY facts present in the intelligence provided — never invent a number, "
         "a development, or a source. Keep each fact plain and punchy.\n"
         "2. Education, not individualized advice; no promises of returns.\n"
-        "3. Tie everything to a life-insurance / Infinite Banking / protect-and-grow "
-        "angle, in the brand voice.\n\n"
-        "BRAND VOICE (guide the caption + hashtags):\n"
-        f"{settings.ibluezcluezflow_guidelines}\n\n"
+        "3. Tie everything to protecting and growing with life insurance, in the brand "
+        "voice and the brand's format below.\n\n"
+        "BRAND VOICE + FORMAT (guide the caption + hashtags + idea):\n"
+        f"{spec['guidelines']}\n\n"
         f"Return ONLY a single-line JSON object with ALL FOUR keys present and non-empty: "
         f"{{\"facts\": [ {n} plain-language strings ], \"caption\": \"the full post "
-        "caption\", \"hashtags\": \"6-10 space-separated viral hashtags, each starting "
-        "with #\", \"post_idea\": \"the reel/post concept in 1-3 sentences\"}}. The "
-        "hashtags MUST be their own field — never fold them into the caption. Do NOT wrap "
-        "the JSON in markdown or code fences, and do NOT add any text before or after. "
-        "Inside string values use \\n for any line breaks — never a raw line break. "
-        "Output the JSON object only."
+        "caption\", \"hashtags\": \"space-separated hashtags, each starting with #\", "
+        f"\"post_idea\": \"{idea_desc}\"}}. The hashtags MUST be their own field — never "
+        "fold them into the caption. Do NOT wrap the JSON in markdown or code fences, and "
+        "do NOT add any text before or after. Inside string values use \\n for any line "
+        "breaks — never a raw line break. Output the JSON object only."
     )
 
 
@@ -64,10 +107,11 @@ class HotTopicReels:
     """Compiles the post package, then (on command) dispatches it to ATHENA/higgbot."""
 
     # ------------------------------------------------------- compiled-package store
-    async def _load_package(self, db: AsyncSession) -> Dict:
+    async def _load_package(self, db: AsyncSession, brand: str = "ibc") -> Dict:
+        key = _brand_specs()[_resolve_brand(brand)]["state_key"]
         try:
             row = (await db.execute(
-                select(AutomationState).where(AutomationState.key == _STATE_KEY)
+                select(AutomationState).where(AutomationState.key == key)
             )).scalars().first()
             if row and isinstance(row.data, dict):
                 return dict(row.data)
@@ -75,15 +119,16 @@ class HotTopicReels:
             logger.debug(f"hot-topic load package failed: {e}")
         return {}
 
-    async def _save_package(self, db: AsyncSession, package: Dict) -> None:
+    async def _save_package(self, db: AsyncSession, package: Dict, brand: str = "ibc") -> None:
+        key = _brand_specs()[_resolve_brand(brand)]["state_key"]
         try:
             row = (await db.execute(
-                select(AutomationState).where(AutomationState.key == _STATE_KEY)
+                select(AutomationState).where(AutomationState.key == key)
             )).scalars().first()
             if row:
                 row.data = package
             else:
-                db.add(AutomationState(key=_STATE_KEY, data=package))
+                db.add(AutomationState(key=key, data=package))
             await db.flush()
         except Exception as e:  # noqa: BLE001
             logger.debug(f"hot-topic save package failed: {e}")
@@ -129,12 +174,19 @@ class HotTopicReels:
         return live  # may be empty / an 'empty brief' — caller handles gracefully
 
     # ------------------------------------------------------------- STEP 1: compile
-    async def compile_package(self, db: AsyncSession) -> Dict:
-        """Compile the 3 hottest facts + caption + hashtags + reel idea, and hold it."""
+    async def compile_package(self, db: AsyncSession, brand: str = "ibc",
+                              intel: Optional[str] = None) -> Dict:
+        """Compile a brand-tailored post package (facts + caption + hashtags + idea).
+
+        `brand`: 'ibc' (ibluezcluezflow reel) or 'nxg' (NXG Facebook post). `intel`
+        lets a caller pass the briefing once and reuse it across both brands."""
+        brand = _resolve_brand(brand)
+        spec = _brand_specs()[brand]
         n = max(1, int(getattr(settings, "hot_topic_facts", 3)))
-        intel = await self._latest_intel(db)
+        if intel is None:
+            intel = await self._latest_intel(db)
         if not intel:
-            return {"ok": False, "reason": "no_intel"}
+            return {"ok": False, "reason": "no_intel", "brand": brand}
 
         prompt = ("Here is today's compiled economic intelligence. Compile the package per "
                   "your rules:\n\n" + intel)
@@ -145,7 +197,7 @@ class HotTopicReels:
             try:
                 raw = await claude_client.chat(
                     messages=[{"role": "user", "content": prompt}],
-                    system_prompt=_compile_system(n),
+                    system_prompt=_compile_system(n, brand),
                     stream=False,
                     max_tokens=settings.oreilus_report_max_tokens,
                     temperature=0.3,  # low temp → clean, structured JSON
@@ -159,10 +211,14 @@ class HotTopicReels:
             obj = None
 
         if obj is None:
-            logger.warning(f"hot-topic compile: unparseable model output: {raw[:300]!r}")
-            return {"ok": False, "reason": "compile_failed"}
+            logger.warning(f"hot-topic compile ({brand}): unparseable output: {raw[:300]!r}")
+            return {"ok": False, "reason": "compile_failed", "brand": brand}
 
         package = {
+            "brand": brand,
+            "brand_name": spec["name"],
+            "format": spec["format"],
+            "accounts": spec["accounts"],
             "facts": [str(f).strip() for f in obj.get("facts") or [] if str(f).strip()][:n],
             "caption": str(obj.get("caption", "")).strip(),
             "hashtags": str(obj.get("hashtags", "")).strip(),
@@ -170,68 +226,112 @@ class HotTopicReels:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if not package["facts"]:
-            return {"ok": False, "reason": "compile_failed"}
-        await self._save_package(db, package)
-        return {"ok": True, "package": package}
+            return {"ok": False, "reason": "compile_failed", "brand": brand}
+        await self._save_package(db, package, brand)
+        return {"ok": True, "package": package, "brand": brand}
+
+    async def compile_brands(self, db: AsyncSession, brands: List[str]) -> Dict:
+        """Compile one or more brands from a SINGLE shared briefing (one web search)."""
+        brands = [_resolve_brand(b) for b in brands] or ["ibc"]
+        # de-dup, preserve order
+        seen: List[str] = []
+        for b in brands:
+            if b not in seen:
+                seen.append(b)
+        intel = await self._latest_intel(db)
+        if not intel:
+            return {"ok": False, "reason": "no_intel", "results": {}}
+        results: Dict[str, Dict] = {}
+        for b in seen:
+            results[b] = await self.compile_package(db, brand=b, intel=intel)
+        ok = any(r.get("ok") for r in results.values())
+        return {"ok": ok, "results": results}
 
     # ------------------------------------------------------------ STEP 2: dispatch
-    async def dispatch(self, db: AsyncSession) -> Dict:
-        """Hand the held package to ATHENA -> higgbot for reel generation + publish."""
+    async def dispatch(self, db: AsyncSession, brand: str = "ibc") -> Dict:
+        """Hand a brand's held package to ATHENA for generation + publish."""
         if not getattr(settings, "athena_enabled", True):
             return {"ok": False, "reason": "athena_disabled"}
 
-        stored = await self._load_package(db)
+        brand = _resolve_brand(brand)
+        spec = _brand_specs()[brand]
+        stored = await self._load_package(db, brand)
         package = stored if stored.get("facts") else None
         if package is None:
             # Nothing compiled yet — compile on the fly so the dispatch still works.
-            res = await self.compile_package(db)
+            res = await self.compile_package(db, brand=brand)
             if not res.get("ok"):
-                return {"ok": False, "reason": res.get("reason", "no_package")}
+                return {"ok": False, "reason": res.get("reason", "no_package"), "brand": brand}
             package = res["package"]
 
-        solo = bool(getattr(settings, "hot_topic_solo_reels", False))
-        if solo:
+        meta_extra = {"brand": spec["name"], "target": spec["target"], "publish": True}
+        if spec["solo"]:
             count = 0
-            for i, fact in enumerate(package.get("facts") or [], 1):
+            facts = package.get("facts") or []
+            for i, fact in enumerate(facts, 1):
                 await athena.enqueue_design_request(
-                    db, request=self._reel_brief(package, solo_fact=fact,
-                                                 idx=i, total=len(package["facts"])),
-                    kind="instagram_post", action="once",
+                    db, request=self._athena_brief(package, brand, solo_fact=fact,
+                                                   idx=i, total=len(facts)),
+                    kind=spec["athena_kind"], action=spec["athena_action"],
+                    meta_extra=meta_extra,
                 )
                 count += 1
             dispatched = count
         else:
             await athena.enqueue_design_request(
-                db, request=self._reel_brief(package), kind="instagram_post", action="once",
+                db, request=self._athena_brief(package, brand),
+                kind=spec["athena_kind"], action=spec["athena_action"],
+                meta_extra=meta_extra,
             )
             dispatched = 1
 
-        logger.info(f"Hot-topic: dispatched {dispatched} reel job(s) to ATHENA/higgbot")
-        return {"ok": True, "package": package, "dispatched": dispatched}
+        logger.info(f"Hot-topic: dispatched {dispatched} {spec['format']} job(s) "
+                    f"to ATHENA for {spec['name']}")
+        return {"ok": True, "package": package, "dispatched": dispatched, "brand": brand}
 
-    def _reel_brief(self, package: Dict, solo_fact: Optional[str] = None,
-                    idx: int = 1, total: int = 1) -> str:
+    async def dispatch_brands(self, db: AsyncSession, brands: List[str]) -> Dict:
+        """Dispatch one or more brands' packages to ATHENA."""
+        brands = [_resolve_brand(b) for b in brands] or ["ibc"]
+        seen: List[str] = []
+        for b in brands:
+            if b not in seen:
+                seen.append(b)
+        results: Dict[str, Dict] = {b: await self.dispatch(db, brand=b) for b in seen}
+        ok = any(r.get("ok") for r in results.values())
+        return {"ok": ok, "results": results}
+
+    def _athena_brief(self, package: Dict, brand: str = "ibc",
+                      solo_fact: Optional[str] = None, idx: int = 1, total: int = 1) -> str:
+        brand = _resolve_brand(brand)
+        spec = _brand_specs()[brand]
         higg = getattr(settings, "higgbot_name", "higgbot")
-        accounts = settings.ibluezcluezflow_accounts
+        accounts = spec["accounts"]
         facts = package.get("facts") or []
         if solo_fact is not None:
             facts_block = f"THE FACT (verified, plain language): {solo_fact}"
-            header = (f"Solo reel {idx} of {total} — this reel centers on ONE fact.")
+            header = f"Solo piece {idx} of {total} — centers on ONE fact."
         else:
             facts_block = "KEY FACTS (verified, plain language):\n" + "\n".join(
                 f"{i}. {f}" for i, f in enumerate(facts, 1)
             )
-            header = "This reel carries the compiled package (all facts + caption)."
+            header = "This piece carries the compiled package (all facts + caption)."
+
+        if spec["format"] == "reel":
+            what = (f"generate an AWARD-WINNING Instagram REEL for {accounts}")
+            roadmap = "ibluezcluezflow"
+        else:
+            what = (f"produce and publish a FACEBOOK FEED POST (not a reel) for {accounts}")
+            roadmap = "NXG Life Group"
         return (
-            f"Hand these details to {higg} — the Master's OWN custom design agent (NOT "
-            f"Higgsfield) — to generate an AWARD-WINNING Instagram REEL for {accounts}. "
-            f"{header} Execute publishing per the ibluezcluezflow CONTENT ROADMAP you hold "
-            f"in your files (format, style, and account routing come from that roadmap).\n\n"
+            f"[{spec['name']}] Hand these details to {higg} — the Master's OWN custom "
+            f"design agent (NOT Higgsfield) — to {what}. {header} Execute publishing per "
+            f"the {roadmap} CONTENT ROADMAP you hold in your files (format, style, and "
+            f"account routing come from that roadmap).\n\n"
             f"POST CAPTION:\n{package.get('caption','')}\n\n"
-            f"VIRAL HASHTAGS:\n{package.get('hashtags','')}\n\n"
-            f"REEL / POST IDEA:\n{package.get('post_idea','')}\n\n"
+            f"HASHTAGS:\n{package.get('hashtags','')}\n\n"
+            f"POST IDEA:\n{package.get('post_idea','')}\n\n"
             f"{facts_block}\n\n"
-            f"Follow the ibluezcluezflow content roadmap in your files for everything else."
+            f"Follow the {roadmap} content roadmap in your files for everything else."
         )
 
     @staticmethod

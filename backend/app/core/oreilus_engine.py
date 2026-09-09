@@ -110,6 +110,23 @@ def wants_compile_post(message: str) -> bool:
     return bool(_COMPILE_POST_INTENT.search(message or ""))
 
 
+def resolve_post_brands(message: str) -> list[str]:
+    """Which account(s) a post command targets: ibluezcluezflow (reels), NXG (Facebook),
+    or both. Named brand alone → that brand; otherwise both accounts (the Master's
+    standing workflow is to build for both)."""
+    m = (message or "").lower()
+    nxg = ("nxg" in m or "life group" in m or "facebook" in m)
+    ibc = ("ibluezcluez" in m or "ibc" in m or "reel" in m or "instagram" in m)
+    both = any(w in m for w in ("both", "all ", "each", "two ", "brands", "accounts"))
+    if both or (nxg and ibc):
+        return ["ibc", "nxg"]
+    if nxg:
+        return ["nxg"]
+    if ibc:
+        return ["ibc"]
+    return ["ibc", "nxg"]      # unspecified → build for both accounts
+
+
 class OreilusEngine:
     """
     O.R.E.L.I.U.S. Core Engine
@@ -430,25 +447,44 @@ class OreilusEngine:
         conversation_id: int,
         user_message: str,
     ) -> Optional[str]:
-        """STEP 1: compile the 3 hottest facts + caption + hashtags + reel idea, and hold it."""
+        """STEP 1: compile the brand-tailored post package(s) and hold them.
+
+        Targets ibluezcluezflow (reel), NXG (Facebook post), or both, resolved from
+        the Master's phrasing. One shared briefing feeds all requested brands."""
+        brands = resolve_post_brands(user_message)
         try:
-            result = await hot_topic_reels.compile_package(db)
+            result = await hot_topic_reels.compile_brands(db, brands)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"hot-topic compile failed, using normal chat: {e}")
             return None
 
         if not result.get("ok"):
-            msgs = {
-                "no_intel": ("Master, I have no compiled economic intelligence to draw from "
-                             "yet. Ask me for the economic news first, then I'll compile the post."),
-                "compile_failed": ("Master, I pulled the intelligence but couldn't compile the "
-                                   "post this cycle. Try again shortly."),
-            }
-            reply = msgs.get(result.get("reason"), "Master, I couldn't compile the post this time.")
+            reason = result.get("reason")
+            if reason == "no_intel" or all(
+                (r.get("reason") == "no_intel") for r in result.get("results", {}).values()
+            ):
+                reply = ("Master, I have no fresh economic intelligence to draw from yet. "
+                         "Ask me for the financial intelligence brief first, then I'll build "
+                         "the posts.")
+            else:
+                reply = ("Master, I pulled the intelligence but couldn't compile the posts "
+                         "this cycle. Try again shortly.")
             await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
             return reply
 
-        reply = self._format_compiled_package(result["package"])
+        parts: list[str] = []
+        for b in brands:
+            r = result["results"].get(b, {})
+            if r.get("ok"):
+                parts.append(self._format_compiled_package(r["package"]))
+            else:
+                name = "NXG Life Group" if b == "nxg" else "ibluezcluezflow"
+                parts.append(f"*(Couldn't compile the {name} package this cycle — try again "
+                             f"shortly.)*")
+        tail = ("\n\nSay the word — *\"hand them to ATHENA and publish\"* — and I'll dispatch "
+                "each to ATHENA: the ibluezcluezflow reel to higgbot, and the NXG post to the "
+                "NXG Facebook page, per the roadmaps ATHENA holds.")
+        reply = "\n\n---\n\n".join(parts) + tail
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
         await self._record_shared_memory(db, user_message, reply)
         return reply
@@ -459,37 +495,50 @@ class OreilusEngine:
         conversation_id: int,
         user_message: str,
     ) -> Optional[str]:
-        """STEP 2: hand the held package to ATHENA -> higgbot to make + publish the reel."""
+        """STEP 2: hand the held package(s) to ATHENA to build + publish per account."""
+        brands = resolve_post_brands(user_message)
         try:
-            result = await hot_topic_reels.dispatch(db)
+            result = await hot_topic_reels.dispatch_brands(db, brands)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"hot-topic dispatch failed, using normal chat: {e}")
             return None
 
         if not result.get("ok"):
-            msgs = {
-                "athena_disabled": ("Master, ATHENA delegation is currently disabled, so I can't "
-                                    "hand the reel to higgbot. Enable ATHENA and I'll run it."),
-                "no_intel": ("Master, there's no economic intelligence to build from yet. Ask me "
-                             "for the economic news, then to compile the post, then I'll dispatch it."),
-                "compile_failed": ("Master, I couldn't compile a post to dispatch this cycle. "
-                                   "Try again shortly."),
-                "no_package": ("Master, I have no compiled post to send. Ask me to compile the "
-                               "3 hottest facts into a post first, then I'll dispatch it."),
-            }
-            reply = msgs.get(result.get("reason"), "Master, I couldn't dispatch the reel this time.")
+            # surface the first meaningful reason
+            reasons = {r.get("reason") for r in result.get("results", {}).values()}
+            if "athena_disabled" in reasons:
+                reply = ("Master, ATHENA delegation is currently disabled, so I can't hand the "
+                         "posts over. Enable ATHENA and I'll run it.")
+            elif "no_intel" in reasons:
+                reply = ("Master, there's no economic intelligence to build from yet. Ask me for "
+                         "the financial intelligence brief, then to build the posts, then I'll "
+                         "dispatch them.")
+            elif "no_package" in reasons or "compile_failed" in reasons:
+                reply = ("Master, I have no compiled posts to send. Ask me to build the posts "
+                         "first, then I'll dispatch them.")
+            else:
+                reply = "Master, I couldn't dispatch the posts this time."
             await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
             return reply
 
         higg = getattr(settings, "higgbot_name", "higgbot")
-        n = result.get("dispatched", 1)
-        what = f"{n} solo reels" if n > 1 else "the reel"
+        sent: list[str] = []
+        for b in brands:
+            r = result["results"].get(b, {})
+            if not r.get("ok"):
+                continue
+            n = r.get("dispatched", 1)
+            if b == "nxg":
+                sent.append("the NXG Life Group Facebook post to ATHENA for the NXG Facebook page")
+            else:
+                what = f"{n} solo reels" if n > 1 else "the reel"
+                sent.append(f"{what} to ATHENA for {higg} on the ibluezcluezflow pages")
+        joined = "; and ".join(sent) if sent else "the posts"
         reply = (
-            f"Understood, Master — I've handed the package to ATHENA to give {higg} for "
-            f"{what}. {higg} will generate an award-winning reel for the ibluezcluezflow "
-            f"pages and ATHENA will publish it per the ibluezcluezflow content roadmap she "
-            f"holds. I'll surface her result — and whether it cleared her quality gate — "
-            f"here through our shared memory as it lands."
+            f"Understood, Master — I've dispatched {joined}. ATHENA will build and publish "
+            f"each per the content roadmaps she holds for each account. I'll surface her "
+            f"results — and whether they cleared her quality gate — here through our shared "
+            f"memory as they land."
         )
         await self.memory.add_message(db, conversation_id, MessageRole.ASSISTANT, reply)
         await self._record_shared_memory(db, user_message, reply)
@@ -498,21 +547,20 @@ class OreilusEngine:
     @staticmethod
     def _format_compiled_package(pkg: dict) -> str:
         facts = pkg.get("facts") or []
-        lines = ["**Here's your ibluezcluezflow post package, Master** — compiled from today's "
-                 "financial intelligence.", "", "**The 3 hottest facts (plain language):**"]
+        brand_name = pkg.get("brand_name") or "ibluezcluezflow"
+        fmt = pkg.get("format") or "reel"
+        idea_label = "Reel idea" if fmt == "reel" else "Facebook post idea"
+        lines = [f"**{brand_name} post package** — compiled from today's financial "
+                 f"intelligence.", "", f"**The {len(facts)} hottest facts (plain language):**"]
         for i, f in enumerate(facts, 1):
             lines.append(f"{i}. {f}")
         lines += [
             "",
             f"**Caption:**\n{pkg.get('caption','')}",
             "",
-            f"**Viral hashtags:**\n{pkg.get('hashtags','')}",
+            f"**Hashtags:**\n{pkg.get('hashtags','')}",
             "",
-            f"**Reel / post idea:**\n{pkg.get('post_idea','')}",
-            "",
-            "Say the word — *\"have ATHENA give it to higgbot and publish\"* — and I'll hand "
-            "this to ATHENA for higgbot to generate the award-winning reel and publish per the "
-            "ibluezcluezflow content roadmap.",
+            f"**{idea_label}:**\n{pkg.get('post_idea','')}",
         ]
         return "\n".join(lines)
 
