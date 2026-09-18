@@ -30,6 +30,21 @@ from .finance_intel import finance_intel
 from ..models.automation_state import AutomationState  # noqa: F401 (register table)
 from . import athena
 
+import re
+
+# ATHENA hard-rejects any caption containing the sequence "--" (its autonomous-text
+# guardrail) and returns published:false WITHOUT posting. A compiled caption that
+# happens to contain a double hyphen would therefore be SILENTLY declined at publish
+# time. Normalize any run of 2+ hyphens to a real em dash before the package is ever
+# stored or dispatched, so ORELIUS never emits content ATHENA will refuse.
+_DOUBLE_HYPHEN = re.compile(r"-{2,}")
+
+
+def _sanitize_for_athena(text: str) -> str:
+    """Make compiled text safe for ATHENA's publish guardrails (no '--' sequence)."""
+    return _DOUBLE_HYPHEN.sub("—", (text or "")).strip()
+
+
 # The two accounts ORELIUS builds for. Each is a DISTINCT brand with its own voice,
 # format, and destination (directive §22 — brands never share a voice). ATHENA's
 # stored roadmap holds the exact publishing routing for each.
@@ -230,10 +245,10 @@ class HotTopicReels:
             "brand_name": spec["name"],
             "format": spec["format"],
             "accounts": spec["accounts"],
-            "facts": [str(f).strip() for f in obj.get("facts") or [] if str(f).strip()][:n],
-            "caption": str(obj.get("caption", "")).strip(),
-            "hashtags": str(obj.get("hashtags", "")).strip(),
-            "post_idea": str(obj.get("post_idea", "")).strip(),
+            "facts": [_sanitize_for_athena(str(f)) for f in obj.get("facts") or [] if str(f).strip()][:n],
+            "caption": _sanitize_for_athena(str(obj.get("caption", ""))),
+            "hashtags": _sanitize_for_athena(str(obj.get("hashtags", ""))),
+            "post_idea": _sanitize_for_athena(str(obj.get("post_idea", ""))),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if not package["facts"]:
