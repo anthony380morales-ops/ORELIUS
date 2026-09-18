@@ -378,13 +378,18 @@ class HotTopicReels:
         return {"ok": ok, "results": results}
 
     # ------------------------------------------------------------ STEP 2: dispatch
-    async def dispatch(self, db: AsyncSession, brand: str = "ibc") -> Dict:
-        """Hand a brand's held package to ATHENA for generation + publish."""
+    async def dispatch(self, db: AsyncSession, brand: str = "ibc",
+                       solo: Optional[bool] = None) -> Dict:
+        """Hand a brand's held package to ATHENA for generation + publish.
+
+        `solo` overrides the brand's solo-reel setting: pass False to emit exactly
+        ONE post (used by the scheduled poster so the daily count matches the plan)."""
         if not getattr(settings, "athena_enabled", True):
             return {"ok": False, "reason": "athena_disabled"}
 
         brand = _resolve_brand(brand)
         spec = _brand_specs()[brand]
+        use_solo = spec["solo"] if solo is None else bool(solo)
         stored = await self._load_package(db, brand)
         package = stored if stored.get("facts") else None
         if package is None:
@@ -413,7 +418,7 @@ class HotTopicReels:
                 "facts": package.get("facts", []),
             },
         }
-        if spec["solo"]:
+        if use_solo:
             count = 0
             facts = package.get("facts") or []
             for i, fact in enumerate(facts, 1):
@@ -437,14 +442,16 @@ class HotTopicReels:
                     f"to ATHENA for {spec['name']}")
         return {"ok": True, "package": package, "dispatched": dispatched, "brand": brand}
 
-    async def dispatch_brands(self, db: AsyncSession, brands: List[str]) -> Dict:
-        """Dispatch one or more brands' packages to ATHENA."""
+    async def dispatch_brands(self, db: AsyncSession, brands: List[str],
+                              solo: Optional[bool] = None) -> Dict:
+        """Dispatch one or more brands' packages to ATHENA. `solo` overrides the
+        per-brand solo-reel setting for every brand (scheduler passes False)."""
         brands = [_resolve_brand(b) for b in brands] or ["ibc"]
         seen: List[str] = []
         for b in brands:
             if b not in seen:
                 seen.append(b)
-        results: Dict[str, Dict] = {b: await self.dispatch(db, brand=b) for b in seen}
+        results: Dict[str, Dict] = {b: await self.dispatch(db, brand=b, solo=solo) for b in seen}
         ok = any(r.get("ok") for r in results.values())
         return {"ok": ok, "results": results}
 
