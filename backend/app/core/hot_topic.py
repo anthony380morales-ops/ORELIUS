@@ -189,6 +189,39 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None) -> 
             f"values use \\n for line breaks — never a raw line break. Output the JSON only."
         )
 
+    # IBC (@ibluezcluezflow) = economic-intelligence media. It publishes a multi-panel
+    # BRIEFING GRAPHIC (figure + label + headline + meaning per panel), not a story or a
+    # single card. Built entirely from ORELIUS's compiled economic data.
+    if _resolve_brand(brand) == "ibc":
+        return (
+            f"You are the economic-intelligence editor for {spec['name']} (@ibluezcluezflow) "
+            f"— a premium 'economic intelligence' media brand for financial professionals, "
+            f"business owners, and financially serious people. You decode what is happening "
+            f"in the economy and what it MEANS for money decisions. You are NOT a consumer "
+            f"life-insurance page and you do not write emotional family stories.\n\n"
+            f"From the compiled economic intelligence provided, build a BRIEFING GRAPHIC of "
+            f"the {n} most impactful, VERIFIED data points. For EACH point give: the hard "
+            f"FIGURE (a number/percent/level actually present in the intel), a short LABEL "
+            f"(e.g. 'CPI · YoY', '10-YR TREASURY', 'FED FUNDS'), a punchy HEADLINE (3-6 "
+            f"words), and one plain-language line on what it MEANS for the reader's money.\n\n"
+            f"Also write: a scroll-stopping TITLE for the graphic (<= 6 words, e.g. 'TOP 3 "
+            f"THINGS MOVING YOUR MONEY' or 'KEY ECONOMIC HEADLINES'); an Instagram CAPTION in "
+            f"an intelligent, analytical, confident voice (decode -> why it matters -> soft "
+            f"CTA such as 'save this' / 'follow for the decode' / 'the full breakdown is in "
+            f"the community'); and relevant HASHTAGS.\n\n"
+            f"HARD RULES: use ONLY figures present in the intelligence — never invent a "
+            f"number or a source; education, not individualized advice; no promised returns; "
+            f"never the sequence '--'.\n\n"
+            f"BRAND VOICE:\n{spec['guidelines']}\n\n"
+            f"Return ONLY a single-line JSON object with ALL keys present and non-empty: "
+            f"{{\"title\": \"the graphic title\", \"panels\": [ {{\"figure\": \"e.g. 3.4%\", "
+            f"\"label\": \"e.g. CPI · YoY\", \"headline\": \"3-6 words\", \"meaning\": \"one "
+            f"plain line\"}} (exactly {n} of these) ], \"caption\": \"the full IG caption\", "
+            f"\"hashtags\": \"space-separated #tags\"}}. Do NOT wrap the JSON in markdown or "
+            f"code fences, add no text before or after, and inside string values use \\n for "
+            f"any line breaks — never a raw line break. Output the JSON object only."
+        )
+
     fmt = spec["format"]
     if fmt == "reel":
         artifact = "one strong REEL IDEA"
@@ -333,7 +366,11 @@ class HotTopicReels:
                 logger.error(f"hot-topic compile call failed (attempt {attempt + 1}): {e}")
                 continue
             obj = self._parse_json(raw)
-            if isinstance(obj, dict) and isinstance(obj.get("facts"), list) and obj["facts"]:
+            # IBC returns a briefing (panels); everyone else returns facts.
+            if isinstance(obj, dict) and (
+                (isinstance(obj.get("panels"), list) and obj["panels"])
+                or (isinstance(obj.get("facts"), list) and obj["facts"])
+            ):
                 break
             obj = None
 
@@ -341,21 +378,40 @@ class HotTopicReels:
             logger.warning(f"hot-topic compile ({brand}): unparseable output: {raw[:300]!r}")
             return {"ok": False, "reason": "compile_failed", "brand": brand}
 
+        # IBC: clean the structured panels; derive facts/post_idea for compatibility.
+        clean_panels: list = []
+        for p in (obj.get("panels") or [])[:n]:
+            if not isinstance(p, dict):
+                continue
+            clean_panels.append({
+                "figure": _sanitize_for_athena(str(p.get("figure", ""))),
+                "label": _sanitize_for_athena(str(p.get("label", ""))),
+                "headline": _sanitize_for_athena(str(p.get("headline", ""))),
+                "meaning": _sanitize_for_athena(str(p.get("meaning", ""))),
+            })
+        facts_src = obj.get("facts") or [
+            f"{p['figure']} — {p['headline']}".strip(" —") for p in clean_panels
+        ]
+
         package = {
             "brand": brand,
             "brand_name": spec["name"],
             "format": spec["format"],
             "accounts": spec["accounts"],
-            "facts": [_sanitize_for_athena(str(f)) for f in obj.get("facts") or [] if str(f).strip()][:n],
+            "facts": [_sanitize_for_athena(str(f)) for f in facts_src if str(f).strip()][:n],
             "caption": _sanitize_for_athena(str(obj.get("caption", ""))),
             "hashtags": _sanitize_for_athena(str(obj.get("hashtags", ""))),
-            "post_idea": _sanitize_for_athena(str(obj.get("post_idea", ""))),
+            "post_idea": _sanitize_for_athena(str(obj.get("post_idea", obj.get("title", "")))),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if clean_panels:  # IBC intelligence-briefing graphic
+            package["panels"] = clean_panels
+            package["title"] = _sanitize_for_athena(str(obj.get("title", "")))
         if tier:  # NXG: record which income tier this post was written for
             package["tier"] = tier["key"]
             package["tier_label"] = tier["label"]
-        if not package["facts"]:
+        # Valid if we have panels (IBC) or facts (others).
+        if not package["facts"] and not clean_panels:
             return {"ok": False, "reason": "compile_failed", "brand": brand}
         await self._save_package(db, package, brand)
         return {"ok": True, "package": package, "brand": brand}
@@ -416,6 +472,9 @@ class HotTopicReels:
                 "hashtags": package.get("hashtags", ""),
                 "post_idea": package.get("post_idea", ""),
                 "facts": package.get("facts", []),
+                # IBC intelligence-briefing graphic (multi-panel). Present for IBC only.
+                "panels": package.get("panels", []),
+                "title": package.get("title", ""),
             },
         }
         if use_solo:
