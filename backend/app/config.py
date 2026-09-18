@@ -196,6 +196,20 @@ class Settings(BaseSettings):
     # carrying the whole package. Master's choice: 3 solo reels.
     hot_topic_solo_reels: bool = True
 
+    # --- Autonomous daily poster ---
+    # ORELIUS compiles FRESH content and dispatches it to ATHENA on a schedule,
+    # so posts appear without anyone asking. Works on Render's free tier because
+    # the bridge polls /api/memory every ~15s, keeping the instance awake.
+    # Times are local to autopost_timezone (DST-aware). Each slot posts ONE piece
+    # per brand (never the 3-solo-reel fan-out), so the count matches the schedule.
+    autopost_enabled: bool = True
+    autopost_timezone: str = "America/Los_Angeles"
+    autopost_times: str = "08:00,13:00,15:00,19:00"   # 8AM, 1PM, 3PM, 7PM PT
+    autopost_brands: str = "nxg,ibc"                   # both accounts; "nxg" for NXG only
+    # A slot only fires within this many minutes of its time (so a slept instance
+    # that wakes late still posts, but a long-missed slot is skipped, not stale-posted).
+    autopost_grace_minutes: int = 90
+
     # --- HIGGBOT creative contract (Phase 4) ---
     # ORELIUS never talks to HIGGBOT directly. Creative missions flow ORELIUS ->
     # ATHENA -> HIGGBOT (HIGGBOT's provider-agnostic router picks the cheapest

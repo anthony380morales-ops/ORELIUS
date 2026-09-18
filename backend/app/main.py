@@ -42,6 +42,14 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(telegram_bot.start())
         logger.info("Telegram bot started")
 
+    # Autonomous daily poster: compiles fresh content and dispatches to ATHENA on
+    # a schedule (kept awake on free tier by the ATHENA bridge's polling).
+    if getattr(settings, "autopost_enabled", False):
+        import asyncio
+        from .core.autopost import run_autopost_loop
+        asyncio.create_task(run_autopost_loop())
+        logger.info("Autonomous daily poster started")
+
     yield
 
     # Shutdown
