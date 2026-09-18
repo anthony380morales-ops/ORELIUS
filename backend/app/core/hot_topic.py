@@ -95,8 +95,100 @@ def _resolve_brand(brand: Optional[str]) -> str:
     return "ibc"
 
 
-def _compile_system(n: int, brand: str = "ibc") -> str:
+# NXG serves three income tiers. Each post is tailored to ONE tier; ORELIUS rotates
+# through them so the page speaks to every segment over time. This is the "who am I
+# solving a problem for today" that drives the story-first NXG caption.
+NXG_INCOME_TIERS = [
+    {
+        "key": "budget",
+        "label": "Low-Income / Budget-Conscious families",
+        "audience": ("working families and individuals on a tight budget who quietly "
+                     "believe real protection is a luxury they can't afford"),
+        "emotional_core": ("the fear of leaving the people they love with debt, funeral "
+                           "costs, or nothing — and the shame of thinking they can't fix it"),
+        "product_angle": ("affordable, essential protection (like term life) that often "
+                          "costs less than they expect and keeps their family from falling "
+                          "off a cliff if the worst happens"),
+        "promise": "value, durability, and covering the essentials — protection they can actually afford",
+    },
+    {
+        "key": "massmarket",
+        "label": "Middle-Income / Mass-Market families",
+        "audience": ("hardworking middle-class families and homeowners who built a stable "
+                     "life and don't want one event to unravel it"),
+        "emotional_core": ("the quiet fear that the life they worked so hard for — the "
+                           "home, the kids' future, the income — could come apart if "
+                           "something happened to them"),
+        "product_angle": ("income replacement, mortgage protection, and coverage that can "
+                          "also build value — protecting the life they've built and the "
+                          "future they're planning for"),
+        "promise": "balance of quality, protection, and convenience — protecting everything they've earned",
+    },
+    {
+        "key": "affluent",
+        "label": "High-Income / Affluent families & business owners",
+        "audience": ("successful professionals, high earners, and business owners focused "
+                     "on legacy, taxes, and passing wealth on their terms"),
+        "emotional_core": ("the weight of making sure everything they built endures — that "
+                           "family and business are protected for generations"),
+        "product_angle": ("bespoke strategy — estate & legacy planning, tax-advantaged "
+                          "wealth transfer, business protection, and generational wealth"),
+        "promise": "exclusivity, premium quality, and a personalized strategy built around their life",
+    },
+]
+
+
+def _select_tier(index: Optional[int] = None) -> Dict:
+    """Pick which income tier a NXG post targets. Rotates by day-of-year so the page
+    cycles Budget -> Mass-market -> Affluent over time; pass an index to force one."""
+    if index is None:
+        index = datetime.now(timezone.utc).timetuple().tm_yday
+    return NXG_INCOME_TIERS[index % len(NXG_INCOME_TIERS)]
+
+
+def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None) -> str:
     spec = _brand_specs()[_resolve_brand(brand)]
+
+    # NXG is story-first and problem-first, NOT an economic-fact compiler. It uses the
+    # economic reality only as quiet context and translates it into a human problem for
+    # ONE income tier, then sells CERTAINTY by solving it — never a pitch.
+    if _resolve_brand(brand) == "nxg":
+        tier = tier or _select_tier()
+        return (
+            f"You are the content voice of {spec['name']}, a licensed California life-"
+            f"insurance & financial-protection agency. You do NOT write economic news or "
+            f"market analysis. You write raw, human, story-led Facebook posts that SOLVE a "
+            f"real person's problem and make them FEEL understood — that is how NXG earns "
+            f"a lead without ever pitching.\n\n"
+            f"TODAY YOU ARE WRITING FOR THIS PERSON:\n"
+            f"- Tier: {tier['label']}\n"
+            f"- Who they are: {tier['audience']}\n"
+            f"- The worry they carry: {tier['emotional_core']}\n"
+            f"- How NXG solves it: {tier['product_angle']}\n"
+            f"- What matters to them: {tier['promise']}\n\n"
+            f"USE the economic reality provided only as quiet background — NEVER the "
+            f"subject. Translate what it means for THIS person's life, right now.\n\n"
+            f"WRITE a single Facebook post that: (1) opens on a specific, real human moment "
+            f"or feeling — a scene, not a statistic; (2) names their quiet worry out loud; "
+            f"(3) shows you understand it; (4) offers the shift — how the right protection "
+            f"turns that worry into peace of mind, in plain words, as the SOLUTION; (5) "
+            f"closes with a warm, low-pressure invitation (a question or open door), NEVER "
+            f"a hard sell. 120-220 words, short paragraphs with line breaks, conversational, "
+            f"first or second person, zero jargon, no guarantees, no invented numbers, and "
+            f"NEVER the sequence '--'. End the caption with: 'CA License #4490102 · "
+            f"Educational, not financial advice.'\n\n"
+            f"BRAND VOICE (obey):\n{spec['guidelines']}\n\n"
+            f"Return ONLY a single-line JSON object with ALL FOUR keys present and non-empty: "
+            f"{{\"facts\": [ 1-3 short TRUE non-numeric grounding truths the story rests on "
+            f"(e.g. 'term life can cost less than a phone bill') — plain and honest, never "
+            f"invented statistics ], \"caption\": \"the full human post caption\", "
+            f"\"hashtags\": \"space-separated warm relevant tags, each starting with #\", "
+            f"\"post_idea\": \"one sentence describing the VISUAL SCENE — a real, human, "
+            f"emotional image (a family moment), never a data card\"}}. Do NOT wrap the JSON "
+            f"in markdown or code fences, and add no text before or after. Inside string "
+            f"values use \\n for line breaks — never a raw line break. Output the JSON only."
+        )
+
     fmt = spec["format"]
     if fmt == "reel":
         artifact = "one strong REEL IDEA"
@@ -209,13 +301,22 @@ class HotTopicReels:
         brand = _resolve_brand(brand)
         spec = _brand_specs()[brand]
         n = max(1, int(getattr(settings, "hot_topic_facts", 3)))
+        # NXG rotates through income tiers and writes story-first; a touch more warmth
+        # (higher temperature) than the IBC fact-compiler.
+        tier = _select_tier() if brand == "nxg" else None
+        temperature = 0.7 if brand == "nxg" else 0.3
         if intel is None:
             intel = await self._latest_intel(db)
         if not intel:
             return {"ok": False, "reason": "no_intel", "brand": brand}
 
-        prompt = ("Here is today's compiled economic intelligence. Compile the package per "
-                  "your rules:\n\n" + intel)
+        if brand == "nxg":
+            prompt = ("Here is today's economic reality as quiet background context. Do NOT "
+                      "report it — translate what it means for the person you're writing "
+                      "for, and write the human post per your rules:\n\n" + intel)
+        else:
+            prompt = ("Here is today's compiled economic intelligence. Compile the package "
+                      "per your rules:\n\n" + intel)
 
         obj: Optional[Dict] = None
         raw = ""
@@ -223,10 +324,10 @@ class HotTopicReels:
             try:
                 raw = await claude_client.chat(
                     messages=[{"role": "user", "content": prompt}],
-                    system_prompt=_compile_system(n, brand),
+                    system_prompt=_compile_system(n, brand, tier),
                     stream=False,
                     max_tokens=settings.oreilus_report_max_tokens,
-                    temperature=0.3,  # low temp → clean, structured JSON
+                    temperature=temperature,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.error(f"hot-topic compile call failed (attempt {attempt + 1}): {e}")
@@ -251,6 +352,9 @@ class HotTopicReels:
             "post_idea": _sanitize_for_athena(str(obj.get("post_idea", ""))),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if tier:  # NXG: record which income tier this post was written for
+            package["tier"] = tier["key"]
+            package["tier_label"] = tier["label"]
         if not package["facts"]:
             return {"ok": False, "reason": "compile_failed", "brand": brand}
         await self._save_package(db, package, brand)
