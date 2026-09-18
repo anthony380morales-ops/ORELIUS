@@ -69,6 +69,9 @@ JOB_TIMEOUT = int(_env("BRIDGE_JOB_TIMEOUT", "1800") or "1800")  # 30 min
 # Heartbeat: how often to mirror ATHENA's own autonomous activity into ORELIUS
 # shared memory (so ORELIUS knows what ATHENA did on its own, like LUCIUS does).
 HEARTBEAT_SECONDS = int(_env("BRIDGE_HEARTBEAT_SECONDS", "600") or "600")  # 10 min
+# Liveness: how often to print an "alive — waiting" line while idle, so a quiet
+# stretch is visibly healthy and never mistaken for a hang. Set 0 to disable.
+ALIVE_SECONDS = int(_env("BRIDGE_ALIVE_SECONDS", "60") or "60")  # 1 min
 STATE_FILE = Path(_env("BRIDGE_STATE_FILE", "") or (Path(__file__).resolve().parent / "athena_bridge_state.json"))
 
 # ATHENA's /jobs API actions. "publish" is the account-aware handler that publishes
@@ -410,6 +413,7 @@ def main() -> None:
     )
 
     last_hb = 0.0
+    last_alive = 0.0
     while True:
         try:
             events = fetch_events(limit=50)
@@ -430,6 +434,13 @@ def main() -> None:
                     # Don't advance last_id: this request will be retried next cycle.
                     log(f"design_request #{ev_id} deferred ({e})")
                     break
+
+            # Liveness line: prove the bridge is alive and polling even when idle,
+            # so a quiet stretch is never mistaken for a hang. Only when there was
+            # nothing to dispatch this cycle (real work already prints its own logs).
+            if not pending and ALIVE_SECONDS > 0 and time.time() - last_alive >= ALIVE_SECONDS:
+                log(f"alive — waiting for requests (last_id={last_id})")
+                last_alive = time.time()
 
             # Heartbeat: mirror ATHENA's own autonomous activity into shared memory.
             if time.time() - last_hb >= HEARTBEAT_SECONDS:
