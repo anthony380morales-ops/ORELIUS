@@ -192,9 +192,10 @@ class Settings(BaseSettings):
     higgbot_name: str = "higgbot"
     # How many facts ORELIUS compiles into the post package.
     hot_topic_facts: int = 3
-    # If true, dispatch one solo reel PER fact (3 solo reels); if false, one reel
-    # carrying the whole package. Master's choice: 3 solo reels.
-    hot_topic_solo_reels: bool = True
+    # If true, dispatch one solo reel PER fact (3 posts); if false, ONE post carrying
+    # the whole package. OFF now: IBC is a single multi-panel intelligence-briefing
+    # graphic and NXG is a single story post — solo fan-out would post duplicates.
+    hot_topic_solo_reels: bool = False
 
     # --- Autonomous daily poster ---
     # ORELIUS compiles FRESH content and dispatches it to ATHENA on a schedule,
