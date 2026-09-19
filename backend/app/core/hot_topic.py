@@ -192,6 +192,9 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
     # NXG is story-first and problem-first, NOT an economic-fact compiler. It uses the
     # economic reality only as quiet context and translates it into a human problem for
     # ONE income tier, then sells CERTAINTY by solving it — never a pitch.
+    kw = getattr(settings, "funnel_optin_keyword", "CLARITY")
+    url = getattr(settings, "funnel_quiz_url", "https://nxglifegroup.org/")
+
     if _resolve_brand(brand) == "nxg":
         tier = tier or _select_tier()
         return (
@@ -212,10 +215,15 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"or feeling — a scene, not a statistic; (2) names their quiet worry out loud; "
             f"(3) shows you understand it; (4) offers the shift — how the right protection "
             f"turns that worry into peace of mind, in plain words, as the SOLUTION; (5) "
-            f"closes with a warm, low-pressure invitation (a question or open door), NEVER "
-            f"a hard sell. 120-220 words, short paragraphs with line breaks, conversational, "
-            f"first or second person, zero jargon, no guarantees, no invented numbers, and "
-            f"NEVER the sequence '--'. End the caption with: 'CA License #4490102 · "
+            f"closes with a warm, low-pressure invitation, NEVER a hard sell. 120-220 "
+            f"words, short paragraphs with line breaks, conversational, first or second "
+            f"person, zero jargon, no guarantees, no invented numbers, and NEVER the "
+            f"sequence '--'.\n\n"
+            f"THE INVITATION (this is how we capture the lead — make it feel human, not "
+            f"salesy): invite the reader to comment the word '{kw}' and you'll send them "
+            f"the free Financial Clarity Assessment (a few questions, then a real person "
+            f"reaches out — no pressure). Also offer the direct link {url} for anyone who'd "
+            f"rather start now. Then end the caption with exactly: 'CA License #4490102 · "
             f"Educational, not financial advice.'\n\n"
             f"BRAND VOICE (obey):\n{spec['guidelines']}\n\n"
             f"Return ONLY a single-line JSON object with ALL FOUR keys present and non-empty: "
@@ -249,9 +257,12 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"words), and one plain-language line on what it MEANS for the reader's money.\n\n"
             f"Also write: a scroll-stopping TITLE for the graphic (<= 6 words, e.g. 'TOP 3 "
             f"THINGS MOVING YOUR MONEY' or 'KEY ECONOMIC HEADLINES'); an Instagram CAPTION in "
-            f"an intelligent, analytical, confident voice (decode -> why it matters -> soft "
-            f"CTA such as 'save this' / 'follow for the decode' / 'the full breakdown is in "
-            f"the community'); and relevant HASHTAGS.\n\n"
+            f"an intelligent, analytical, confident voice (decode -> why it matters -> then "
+            f"the CTA); and relevant HASHTAGS.\n\n"
+            f"THE CTA (how we capture the lead): after the decode, invite the reader to "
+            f"comment '{kw}' to get a free, personalized Financial Clarity Assessment on what "
+            f"this means for their own money (a real person follows up, no pressure), and "
+            f"offer the link {url} to start now. Keep it confident and useful, never pushy.\n\n"
             f"HARD RULES: use ONLY figures present in the intelligence — never invent a "
             f"number or a source; education, not individualized advice; no promised returns; "
             f"never the sequence '--'.\n\n"
