@@ -139,14 +139,54 @@ NXG_INCOME_TIERS = [
 
 
 def _select_tier(index: Optional[int] = None) -> Dict:
-    """Pick which income tier a NXG post targets. Rotates by day-of-year so the page
-    cycles Budget -> Mass-market -> Affluent over time; pass an index to force one."""
+    """Pick which income tier a NXG post targets. Rotates by the rotation index so
+    EACH post targets a different demographic; falls back to day-of-year."""
     if index is None:
         index = datetime.now(timezone.utc).timetuple().tm_yday
     return NXG_INCOME_TIERS[index % len(NXG_INCOME_TIERS)]
 
 
-def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None) -> str:
+# IBC covers a different ECONOMIC ANGLE each post, so every graphic through the day
+# carries distinct facts (not the same Fed/CPI/mortgage numbers repeated). Rotated
+# by the same rotation index that drives NXG's tier.
+IBC_ANGLES = [
+    "interest rates & the Federal Reserve — rate decisions, fed funds, what it means for borrowing and saving",
+    "inflation & cost of living — CPI, real wages, purchasing power, everyday prices",
+    "housing & mortgages — mortgage rates, affordability, home equity, real estate",
+    "jobs & the broader economy — employment, GDP, consumer spending, recession signals",
+    "markets & yields — Treasury yields, stocks, bonds, where safe money earns today",
+    "debt & banking — national debt, deficits, bank stability, FDIC, where big money parks",
+]
+
+
+def _select_angle(index: Optional[int] = None) -> str:
+    if index is None:
+        index = datetime.now(timezone.utc).timetuple().tm_yday
+    return IBC_ANGLES[index % len(IBC_ANGLES)]
+
+
+async def _next_rotation(db: AsyncSession) -> int:
+    """A persistent, always-incrementing counter so each post (across slots and days)
+    gets a different NXG tier + IBC angle. Survives restarts via AutomationState."""
+    key = "content_rotation"
+    try:
+        row = (await db.execute(
+            select(AutomationState).where(AutomationState.key == key)
+        )).scalars().first()
+        n = (int(row.data.get("n", 0)) if row and isinstance(row.data, dict) else 0) + 1
+        if row:
+            row.data = {"n": n}
+        else:
+            db.add(AutomationState(key=key, data={"n": n}))
+        await db.flush()
+        return n
+    except Exception as e:  # noqa: BLE001 - never block a compile on the counter
+        logger.debug(f"rotation counter failed: {e}")
+        return int(datetime.now(timezone.utc).timestamp()) // 900  # varies over time
+
+
+def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
+                    angle: Optional[str] = None) -> str:
     spec = _brand_specs()[_resolve_brand(brand)]
 
     # NXG is story-first and problem-first, NOT an economic-fact compiler. It uses the
@@ -193,14 +233,17 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None) -> 
     # BRIEFING GRAPHIC (figure + label + headline + meaning per panel), not a story or a
     # single card. Built entirely from ORELIUS's compiled economic data.
     if _resolve_brand(brand) == "ibc":
+        angle = angle or _select_angle()
         return (
             f"You are the economic-intelligence editor for {spec['name']} (@ibluezcluezflow) "
             f"— a premium 'economic intelligence' media brand for financial professionals, "
             f"business owners, and financially serious people. You decode what is happening "
             f"in the economy and what it MEANS for money decisions. You are NOT a consumer "
             f"life-insurance page and you do not write emotional family stories.\n\n"
+            f"THIS POST'S ANGLE (focus the ENTIRE briefing on this theme, so it is distinct "
+            f"from other posts today): {angle}.\n\n"
             f"From the compiled economic intelligence provided, build a BRIEFING GRAPHIC of "
-            f"the {n} most impactful, VERIFIED data points. For EACH point give: the hard "
+            f"the {n} most impactful, VERIFIED data points WITHIN THAT ANGLE. For EACH point give: the hard "
             f"FIGURE (a number/percent/level actually present in the intel), a short LABEL "
             f"(e.g. 'CPI · YoY', '10-YR TREASURY', 'FED FUNDS'), a punchy HEADLINE (3-6 "
             f"words), and one plain-language line on what it MEANS for the reader's money.\n\n"
@@ -326,18 +369,24 @@ class HotTopicReels:
 
     # ------------------------------------------------------------- STEP 1: compile
     async def compile_package(self, db: AsyncSession, brand: str = "ibc",
-                              intel: Optional[str] = None) -> Dict:
+                              intel: Optional[str] = None,
+                              rotation: Optional[int] = None) -> Dict:
         """Compile a brand-tailored post package (facts + caption + hashtags + idea).
 
         `brand`: 'ibc' (ibluezcluezflow reel) or 'nxg' (NXG Facebook post). `intel`
-        lets a caller pass the briefing once and reuse it across both brands."""
+        lets a caller pass the briefing once and reuse it across both brands.
+        `rotation` drives per-post variety (NXG income tier + IBC economic angle) so
+        every post through the day is distinct; resolved from a persistent counter."""
         brand = _resolve_brand(brand)
         spec = _brand_specs()[brand]
         n = max(1, int(getattr(settings, "hot_topic_facts", 3)))
-        # NXG rotates through income tiers and writes story-first; a touch more warmth
-        # (higher temperature) than the IBC fact-compiler.
-        tier = _select_tier() if brand == "nxg" else None
-        temperature = 0.7 if brand == "nxg" else 0.3
+        if rotation is None:
+            rotation = await _next_rotation(db)
+        # NXG rotates income tiers; IBC rotates economic angle — both by `rotation` so
+        # each post is distinct. NXG writes story-first (a touch more warmth).
+        tier = _select_tier(rotation) if brand == "nxg" else None
+        angle = _select_angle(rotation) if brand == "ibc" else None
+        temperature = 0.7 if brand == "nxg" else 0.4
         if intel is None:
             intel = await self._latest_intel(db)
         if not intel:
@@ -357,7 +406,7 @@ class HotTopicReels:
             try:
                 raw = await claude_client.chat(
                     messages=[{"role": "user", "content": prompt}],
-                    system_prompt=_compile_system(n, brand, tier),
+                    system_prompt=_compile_system(n, brand, tier, angle),
                     stream=False,
                     max_tokens=settings.oreilus_report_max_tokens,
                     temperature=temperature,
@@ -427,9 +476,12 @@ class HotTopicReels:
         intel = await self._latest_intel(db)
         if not intel:
             return {"ok": False, "reason": "no_intel", "results": {}}
+        # One rotation per compile so this slot's NXG tier + IBC angle differ from the
+        # last slot's — every post through the day is distinct.
+        rotation = await _next_rotation(db)
         results: Dict[str, Dict] = {}
         for b in seen:
-            results[b] = await self.compile_package(db, brand=b, intel=intel)
+            results[b] = await self.compile_package(db, brand=b, intel=intel, rotation=rotation)
         ok = any(r.get("ok") for r in results.values())
         return {"ok": ok, "results": results}
 
