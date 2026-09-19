@@ -496,8 +496,6 @@ class HotTopicReels:
             return {"ok": False, "reason": "athena_disabled"}
 
         brand = _resolve_brand(brand)
-        spec = _brand_specs()[brand]
-        use_solo = spec["solo"] if solo is None else bool(solo)
         stored = await self._load_package(db, brand)
         package = stored if stored.get("facts") else None
         if package is None:
@@ -506,6 +504,17 @@ class HotTopicReels:
             if not res.get("ok"):
                 return {"ok": False, "reason": res.get("reason", "no_package"), "brand": brand}
             package = res["package"]
+        return await self.dispatch_package(db, brand, package, solo=solo)
+
+    async def dispatch_package(self, db: AsyncSession, brand: str, package: Dict,
+                              solo: Optional[bool] = None) -> Dict:
+        """Dispatch a SPECIFIC pre-compiled package to ATHENA (used by the morning
+        planner so the posts shown to the Master are the exact ones that publish)."""
+        if not getattr(settings, "athena_enabled", True):
+            return {"ok": False, "reason": "athena_disabled"}
+        brand = _resolve_brand(brand)
+        spec = _brand_specs()[brand]
+        use_solo = spec["solo"] if solo is None else bool(solo)
 
         # Full ORELIUS -> ATHENA publish contract. ATHENA's account-aware handler reads
         # accountId/brandId/platform/format to route to the correct account, and

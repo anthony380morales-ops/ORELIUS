@@ -211,6 +211,14 @@ class Settings(BaseSettings):
     # that wakes late still posts, but a long-missed slot is skipped, not stale-posted).
     autopost_grace_minutes: int = 90
 
+    # --- Autonomous morning brief ---
+    # Each morning ORELIUS pulls the financial-intelligence report AND pre-compiles the
+    # whole day's posts, then drops both into the Master's conversation so he wakes up
+    # to the report + exactly what will publish today and when. The scheduled slots then
+    # publish those pre-compiled posts. No asking required.
+    morning_brief_enabled: bool = True
+    morning_brief_time: str = "07:30"   # local to autopost_timezone
+
     # --- HIGGBOT creative contract (Phase 4) ---
     # ORELIUS never talks to HIGGBOT directly. Creative missions flow ORELIUS ->
     # ATHENA -> HIGGBOT (HIGGBOT's provider-agnostic router picks the cheapest
