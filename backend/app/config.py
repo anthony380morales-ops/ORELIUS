@@ -144,6 +144,13 @@ class Settings(BaseSettings):
     nxg_account_id: str = "nxg_life_group"
     nxg_brand_id: str = "NXG"
 
+    # --- Funnel / outreach (comment-to-DM opt-in via ManyChat) ---
+    # Every autonomous post invites viewers to comment the keyword; ManyChat then
+    # auto-DMs them the assessment link. This converts organic reach into funnel
+    # intake without any ToS-violating DM automation from the pages themselves.
+    funnel_quiz_url: str = "https://nxglifegroup.org/"
+    funnel_optin_keyword: str = "CLARITY"
+
     # --- NXG Life Group (second brand — Facebook page) ---
     # NXG is a DISTINCT account from ibluezcluezflow: California families, warm and
     # trustworthy, plain-language life-insurance education for a Facebook feed post
