@@ -197,9 +197,10 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
 
     if _resolve_brand(brand) == "nxg":
         tier = tier or _select_tier()
+        angle = angle or _select_angle()
         return (
             f"You are the content voice of {spec['name']}, a licensed California life-"
-            f"insurance & financial-protection agency. You do NOT write economic news or "
+            f"insurance & financial-protection agency. You do NOT write dry economic news or "
             f"market analysis. You write raw, human, story-led Facebook posts that SOLVE a "
             f"real person's problem and make them FEEL understood — that is how NXG earns "
             f"a lead without ever pitching.\n\n"
@@ -209,16 +210,22 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"- The worry they carry: {tier['emotional_core']}\n"
             f"- How NXG solves it: {tier['product_angle']}\n"
             f"- What matters to them: {tier['promise']}\n\n"
-            f"USE the economic reality provided only as quiet background — NEVER the "
-            f"subject. Translate what it means for THIS person's life, right now.\n\n"
+            f"THIS POST'S ECONOMIC ANCHOR (so every post today carries DIFFERENT, fresh "
+            f"information): {angle}.\n"
+            f"From the economic intelligence provided, pick ONE specific, recent, VERIFIED "
+            f"development within that anchor theme (a real figure or a real change — e.g. a "
+            f"mortgage-rate move, a CPI reading, a Fed decision, a jobs number) and let it "
+            f"be the true-life reason this post exists TODAY. Weave that single real fact in "
+            f"naturally, in plain human words — it is the spark, not a lecture. Do NOT list "
+            f"multiple stats, and NEVER invent a number: if the intel has no solid figure "
+            f"for this theme, reference the development qualitatively.\n\n"
             f"WRITE a single Facebook post that: (1) opens on a specific, real human moment "
-            f"or feeling — a scene, not a statistic; (2) names their quiet worry out loud; "
-            f"(3) shows you understand it; (4) offers the shift — how the right protection "
-            f"turns that worry into peace of mind, in plain words, as the SOLUTION; (5) "
-            f"closes with a warm, low-pressure invitation, NEVER a hard sell. 120-220 "
-            f"words, short paragraphs with line breaks, conversational, first or second "
-            f"person, zero jargon, no guarantees, no invented numbers, and NEVER the "
-            f"sequence '--'.\n\n"
+            f"or feeling tied to that development — a scene, not a chart; (2) names their "
+            f"quiet worry out loud; (3) shows you understand it; (4) offers the shift — how "
+            f"the right protection turns that worry into peace of mind, in plain words, as "
+            f"the SOLUTION; (5) closes with a warm, low-pressure invitation, NEVER a hard "
+            f"sell. 120-220 words, short paragraphs with line breaks, conversational, first "
+            f"or second person, zero jargon, no guarantees, and NEVER the sequence '--'.\n\n"
             f"THE INVITATION (this is how we capture the lead — make it feel human, not "
             f"salesy): invite the reader to comment the word '{kw}' and you'll send them "
             f"the free Financial Clarity Assessment (a few questions, then a real person "
@@ -227,9 +234,10 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"Educational, not financial advice.'\n\n"
             f"BRAND VOICE (obey):\n{spec['guidelines']}\n\n"
             f"Return ONLY a single-line JSON object with ALL FOUR keys present and non-empty: "
-            f"{{\"facts\": [ 1-3 short TRUE non-numeric grounding truths the story rests on "
-            f"(e.g. 'term life can cost less than a phone bill') — plain and honest, never "
-            f"invented statistics ], \"caption\": \"the full human post caption\", "
+            f"{{\"facts\": [ the ONE specific real development this post is anchored on, "
+            f"stated as a short plain-language line (a real figure/change from the intel, or "
+            f"a qualitative development — never an invented statistic), optionally plus 1 "
+            f"honest grounding truth ], \"caption\": \"the full human post caption\", "
             f"\"hashtags\": \"space-separated warm relevant tags, each starting with #\", "
             f"\"post_idea\": \"one sentence describing the VISUAL SCENE — a real, human, "
             f"emotional image (a family moment), never a data card\"}}. Do NOT wrap the JSON "
@@ -393,10 +401,12 @@ class HotTopicReels:
         n = max(1, int(getattr(settings, "hot_topic_facts", 3)))
         if rotation is None:
             rotation = await _next_rotation(db)
-        # NXG rotates income tiers; IBC rotates economic angle — both by `rotation` so
-        # each post is distinct. NXG writes story-first (a touch more warmth).
+        # NXG rotates income tier AND economic angle; IBC rotates economic angle —
+        # all by `rotation` so each post through the day carries a DIFFERENT topic +
+        # audience. NXG writes story-first (a touch more warmth); the angle keeps
+        # every Facebook post anchored on a distinct, fresh, verified development.
         tier = _select_tier(rotation) if brand == "nxg" else None
-        angle = _select_angle(rotation) if brand == "ibc" else None
+        angle = _select_angle(rotation) if brand in ("ibc", "nxg") else None
         temperature = 0.7 if brand == "nxg" else 0.4
         if intel is None:
             intel = await self._latest_intel(db)
@@ -470,6 +480,8 @@ class HotTopicReels:
         if tier:  # NXG: record which income tier this post was written for
             package["tier"] = tier["key"]
             package["tier_label"] = tier["label"]
+        if angle:  # record the economic angle so each post's topic is distinct + visible
+            package["angle"] = angle
         # Valid if we have panels (IBC) or facts (others).
         if not package["facts"] and not clean_panels:
             return {"ok": False, "reason": "compile_failed", "brand": brand}
