@@ -114,10 +114,12 @@ def _format_brief(intel: str, times: List[str], plan_slots: dict) -> str:
         ibc = slot.get("ibc")
         if nxg:
             tier = nxg.get("tier_label", "")
+            topic = (nxg.get("angle", "") or "").split("—")[0].strip()
             cap = (nxg.get("caption", "") or "").strip().replace("\n", " ")
             if len(cap) > 220:
                 cap = cap[:220].rstrip() + "…"
-            parts.append(f"  • NXG · Facebook — {tier}")
+            label = f"{tier} · {topic}" if topic else tier
+            parts.append(f"  • NXG · Facebook — {label}")
             parts.append(f"    “{cap}”")
         if ibc:
             parts.append(f"  • IBC · Instagram — {ibc.get('title', 'Economic briefing')}")
