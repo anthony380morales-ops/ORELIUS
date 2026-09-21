@@ -34,6 +34,10 @@ playwright==1.41.2
 # Task Scheduling
 apscheduler==3.10.4
 pytz==2024.1
+# zoneinfo.ZoneInfo (autopost scheduler) needs the IANA tz database, which the
+# python:3.11-slim base image does NOT ship. Without this, ZoneInfo("America/
+# Los_Angeles") raises ZoneInfoNotFoundError and the autopost loop never fires.
+tzdata==2024.1
 
 # WebSocket
 python-socketio==5.11.1

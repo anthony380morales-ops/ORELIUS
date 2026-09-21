@@ -19,7 +19,7 @@ redeploy never double-posts or re-briefs.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import List
 from zoneinfo import ZoneInfo
 
@@ -43,11 +43,20 @@ def _parse_list(raw: str) -> List[str]:
     return [x.strip() for x in (raw or "").split(",") if x.strip()]
 
 
-def _tz() -> ZoneInfo:
+def _tz() -> tzinfo:
+    """Resolve the configured timezone. If the tz database is unavailable (e.g. a
+    slim image missing `tzdata`), fall back to a fixed Pacific offset so the loop
+    keeps firing instead of crashing every tick. This fallback must NEVER raise —
+    a raise here silently kills the whole autopost loop."""
+    name = getattr(settings, "autopost_timezone", "America/Los_Angeles")
     try:
-        return ZoneInfo(getattr(settings, "autopost_timezone", "America/Los_Angeles"))
-    except Exception:  # noqa: BLE001
-        return ZoneInfo("America/Los_Angeles")
+        return ZoneInfo(name)
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            f"autopost: ZoneInfo('{name}') failed ({e}); is `tzdata` installed? "
+            f"Falling back to a fixed UTC-8 offset so posting still fires."
+        )
+        return timezone(timedelta(hours=-8), "PST-fallback")
 
 
 def _hhmm_display(hhmm: str) -> str:
