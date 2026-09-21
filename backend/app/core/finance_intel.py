@@ -464,6 +464,18 @@ class FinanceIntel:
                 "service didn't respond. The official data feeds are still tracked; try me "
                 "again shortly and I'll have the latest developments stacked for you.")
 
+    async def data_snapshot(self) -> Dict[str, list]:
+        """A structured snapshot of the current verified figures, grouped by source
+        ({source: [{metric,value,unit,date,change_vs_prior}...]}). Used by the post
+        compiler to hand each graphic the EXACT numbers for its angle — no prose
+        extraction, no drift. Best-effort: returns {} if the feeds are unreachable."""
+        try:
+            items = await self._gather_all()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"data_snapshot gather failed: {e}")
+            items = []
+        return self._group_by_source(items)
+
     # ---------------------------------------------------------------- persistence
     async def _load_seen(self, db: AsyncSession) -> Dict[str, str]:
         try:
