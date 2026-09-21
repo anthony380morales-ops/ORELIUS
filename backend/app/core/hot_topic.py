@@ -165,6 +165,64 @@ def _select_angle(index: Optional[int] = None) -> str:
     return IBC_ANGLES[index % len(IBC_ANGLES)]
 
 
+def _angle_index(rotation: Optional[int]) -> int:
+    if rotation is None:
+        rotation = datetime.now(timezone.utc).timetuple().tm_yday
+    return rotation % len(IBC_ANGLES)
+
+
+def _metric_angle(label: str) -> int:
+    """Assign a verified metric to EXACTLY ONE angle (indices align to IBC_ANGLES),
+    so each day's posts draw from non-overlapping data — no metric appears twice."""
+    l = (label or "").lower()
+    if "mortgage" in l or "housing" in l:
+        return 2  # housing & mortgages
+    if "cpi" in l or "pce" in l or "consumer price" in l:
+        return 1  # inflation
+    if any(k in l for k in ("moody", "corporate bond", "aaa", "baa", "national debt",
+                            "avg interest", "fdic", "bank")):
+        return 5  # debt & banking (check before treasury so Moody's spread lands here)
+    if any(k in l for k in ("s&p", "volatility", "vix")) or "10-year treasury" in l or "10-yr treasury" in l:
+        return 4  # markets & yields
+    if any(k in l for k in ("federal funds", "2-year treasury", "yield curve", "spread")):
+        return 0  # interest rates & the Fed
+    if any(k in l for k in ("unemployment", "payroll", "jobless", "industrial production",
+                            "retail sales", "gdp", "sentiment", "saving")):
+        return 3  # jobs & the broader economy
+    return 3  # default: economy bucket
+
+
+def _figures_for_angle(data_points: Optional[Dict], angle_idx: int, cap: int = 6) -> List[str]:
+    """Exact verified data lines belonging to this angle, from the finance engine's
+    structured snapshot ({source: [{metric,value,unit,date,change_vs_prior}...]}).
+    These are handed to the model as the ONLY numbers it may use — no drift, no
+    approximation, no cross-post repeats."""
+    out: List[str] = []
+    for source, items in (data_points or {}).items():
+        for it in items or []:
+            label = str(it.get("metric", "")).strip()
+            if not label or _metric_angle(label) != angle_idx:
+                continue
+            val = it.get("value")
+            if val in (None, "", "."):
+                continue
+            unit = (it.get("unit") or "").strip()
+            val_str = f"{val}%" if unit == "%" else (f"{val} {unit}".strip())
+            line = f"{label}: {val_str}"
+            date = it.get("date")
+            chg = it.get("change_vs_prior")
+            extra = []
+            if date:
+                extra.append(f"as of {date}")
+            if chg is not None:
+                extra.append(f"change {chg:+g} vs prior")
+            if extra:
+                line += " (" + "; ".join(extra) + ")"
+            line += f" [{source}]"
+            out.append(line)
+    return out[:cap]
+
+
 async def _next_rotation(db: AsyncSession) -> int:
     """A persistent, always-incrementing counter so each post (across slots and days)
     gets a different NXG tier + IBC angle. Survives restarts via AutomationState."""
@@ -186,8 +244,18 @@ async def _next_rotation(db: AsyncSession) -> int:
 
 
 def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
-                    angle: Optional[str] = None) -> str:
+                    angle: Optional[str] = None, figures: Optional[List[str]] = None) -> str:
     spec = _brand_specs()[_resolve_brand(brand)]
+
+    # Exact verified figures for this post's angle — the ONLY numbers the model may use.
+    fig_block = ""
+    if figures:
+        fig_block = (
+            "\n\nVERIFIED FIGURES FOR THIS ANGLE — these are the ONLY numbers you may use. "
+            "Use each EXACTLY as written (same value, same rounding). Do NOT invent, "
+            "estimate, re-round, or add any figure not in this list, and do NOT reuse a "
+            "generic headline number that isn't here:\n" + "\n".join(f"• {f}" for f in figures)
+        )
 
     # NXG is story-first and problem-first, NOT an economic-fact compiler. It uses the
     # economic reality only as quiet context and translates it into a human problem for
@@ -217,8 +285,8 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"mortgage-rate move, a CPI reading, a Fed decision, a jobs number) and let it "
             f"be the true-life reason this post exists TODAY. Weave that single real fact in "
             f"naturally, in plain human words — it is the spark, not a lecture. Do NOT list "
-            f"multiple stats, and NEVER invent a number: if the intel has no solid figure "
-            f"for this theme, reference the development qualitatively.\n\n"
+            f"multiple stats, and NEVER invent a number: if no figure is provided for this "
+            f"theme, reference the development qualitatively.{fig_block}\n\n"
             f"WRITE a single Facebook post that: (1) opens on a specific, real human moment "
             f"or feeling tied to that development — a scene, not a chart; (2) names their "
             f"quiet worry out loud; (3) shows you understand it; (4) offers the shift — how "
@@ -257,10 +325,13 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"in the economy and what it MEANS for money decisions. You are NOT a consumer "
             f"life-insurance page and you do not write emotional family stories.\n\n"
             f"THIS POST'S ANGLE (focus the ENTIRE briefing on this theme, so it is distinct "
-            f"from other posts today): {angle}.\n\n"
-            f"From the compiled economic intelligence provided, build a BRIEFING GRAPHIC of "
-            f"the {n} most impactful, VERIFIED data points WITHIN THAT ANGLE. For EACH point give: the hard "
-            f"FIGURE (a number/percent/level actually present in the intel), a short LABEL "
+            f"from other posts today): {angle}.{fig_block}\n\n"
+            f"Build a BRIEFING GRAPHIC of the {n} most impactful VERIFIED data points WITHIN "
+            f"THAT ANGLE"
+            + (", drawn ONLY from the verified figures listed above" if figures else
+               ", each a number/level actually present in the compiled intelligence")
+            + f". For EACH point give: the hard "
+            f"FIGURE (the exact number/percent/level), a short LABEL "
             f"(e.g. 'CPI · YoY', '10-YR TREASURY', 'FED FUNDS'), a punchy HEADLINE (3-6 "
             f"words), and one plain-language line on what it MEANS for the reader's money.\n\n"
             f"Also write: a scroll-stopping TITLE for the graphic (<= 6 words, e.g. 'TOP 3 "
@@ -389,7 +460,8 @@ class HotTopicReels:
     # ------------------------------------------------------------- STEP 1: compile
     async def compile_package(self, db: AsyncSession, brand: str = "ibc",
                               intel: Optional[str] = None,
-                              rotation: Optional[int] = None) -> Dict:
+                              rotation: Optional[int] = None,
+                              data_points: Optional[Dict] = None) -> Dict:
         """Compile a brand-tailored post package (facts + caption + hashtags + idea).
 
         `brand`: 'ibc' (ibluezcluezflow reel) or 'nxg' (NXG Facebook post). `intel`
@@ -407,6 +479,9 @@ class HotTopicReels:
         # every Facebook post anchored on a distinct, fresh, verified development.
         tier = _select_tier(rotation) if brand == "nxg" else None
         angle = _select_angle(rotation) if brand in ("ibc", "nxg") else None
+        # Exact verified figures for THIS angle only — non-overlapping across the day,
+        # and the sole numbers the model may use (kills cross-post repeats + drift).
+        figures = _figures_for_angle(data_points, _angle_index(rotation)) if data_points else []
         temperature = 0.7 if brand == "nxg" else 0.4
         if intel is None:
             intel = await self._latest_intel(db)
@@ -427,7 +502,7 @@ class HotTopicReels:
             try:
                 raw = await claude_client.chat(
                     messages=[{"role": "user", "content": prompt}],
-                    system_prompt=_compile_system(n, brand, tier, angle),
+                    system_prompt=_compile_system(n, brand, tier, angle, figures),
                     stream=False,
                     max_tokens=settings.oreilus_report_max_tokens,
                     temperature=temperature,
@@ -499,12 +574,15 @@ class HotTopicReels:
         intel = await self._latest_intel(db)
         if not intel:
             return {"ok": False, "reason": "no_intel", "results": {}}
+        # Structured verified figures so each post uses EXACT, angle-specific numbers.
+        data_points = await finance_intel.data_snapshot()
         # One rotation per compile so this slot's NXG tier + IBC angle differ from the
         # last slot's — every post through the day is distinct.
         rotation = await _next_rotation(db)
         results: Dict[str, Dict] = {}
         for b in seen:
-            results[b] = await self.compile_package(db, brand=b, intel=intel, rotation=rotation)
+            results[b] = await self.compile_package(db, brand=b, intel=intel,
+                                                    rotation=rotation, data_points=data_points)
         ok = any(r.get("ok") for r in results.values())
         return {"ok": ok, "results": results}
 

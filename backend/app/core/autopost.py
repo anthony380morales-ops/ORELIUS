@@ -137,17 +137,26 @@ async def _run_morning_brief(db, day: str) -> None:
         return
     logger.info(f"morning-brief: building for {day} (slots={times}, brands={brands})")
 
-    # 1. Pull the intelligence report (records it too).
+    # 1. Pull the intelligence report (records it too), plus the STRUCTURED verified
+    #    figures so each post is built from exact, angle-specific numbers (no drift,
+    #    no cross-post repeats).
     intel = ""
+    data_points: dict = {}
     try:
         res = await finance_intel.generate_brief(db)
         intel = (res or {}).get("summary", "") or ""
+        data_points = ((res or {}).get("data", {}) or {}).get("sources", {}) or {}
     except Exception as e:  # noqa: BLE001
         logger.warning(f"morning-brief intel failed: {e}")
         try:
             intel = await finance_intel.live_briefing()
         except Exception:  # noqa: BLE001
             intel = ""
+    if not data_points:
+        try:
+            data_points = await finance_intel.data_snapshot()
+        except Exception:  # noqa: BLE001
+            data_points = {}
 
     # 2. Pre-compile the whole day's posts, one rotation per slot (distinct each slot).
     plan_slots: dict = {}
@@ -156,7 +165,8 @@ async def _run_morning_brief(db, day: str) -> None:
         slot_pkgs: dict = {}
         for b in brands:
             try:
-                r = await hot_topic_reels.compile_package(db, brand=b, intel=intel or None, rotation=rotation)
+                r = await hot_topic_reels.compile_package(db, brand=b, intel=intel or None,
+                                                          rotation=rotation, data_points=data_points or None)
                 if r.get("ok"):
                     slot_pkgs[r["brand"]] = r["package"]
             except Exception as e:  # noqa: BLE001
