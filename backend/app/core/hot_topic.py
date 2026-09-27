@@ -486,7 +486,9 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"Return ONLY a single-line JSON object with ALL keys present and non-empty: "
             f"{{\"title\": \"the graphic title\", \"panels\": [ {{\"figure\": \"e.g. 3.4%\", "
             f"\"label\": \"e.g. CPI · YoY\", \"headline\": \"3-6 words\", \"meaning\": \"one "
-            f"plain line\"}} (exactly {n} of these) ], \"caption\": \"the full IG caption\", "
+            f"plain line\", \"source\": \"the PRIMARY source of THIS figure, taken from the "
+            f"intelligence — e.g. Federal Reserve, BLS, Treasury, NY Fed, BEA, Freddie Mac; "
+            f"never invented\"}} (exactly {n} of these) ], \"caption\": \"the full IG caption\", "
             f"\"hashtags\": \"space-separated #tags\"}}. Do NOT wrap the JSON in markdown or "
             f"code fences, add no text before or after, and inside string values use \\n for "
             f"any line breaks — never a raw line break. Output the JSON object only."
@@ -672,6 +674,8 @@ class HotTopicReels:
                 "label": _sanitize_for_athena(str(p.get("label", ""))),
                 "headline": _sanitize_for_athena(str(p.get("headline", ""))),
                 "meaning": _sanitize_for_athena(str(p.get("meaning", ""))),
+                # Primary source per stat (credibility signal on the briefing graphic).
+                "source": _sanitize_for_athena(str(p.get("source", ""))),
             })
         facts_src = obj.get("facts") or [
             f"{p['figure']} — {p['headline']}".strip(" —") for p in clean_panels
