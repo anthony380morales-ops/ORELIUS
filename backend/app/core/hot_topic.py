@@ -171,6 +171,21 @@ def _angle_index(rotation: Optional[int]) -> int:
     return rotation % len(IBC_ANGLES)
 
 
+# Per NXG directive §13 (lead ladder) + §43 hierarchy: most posts EDUCATE and spark
+# curiosity; only a minority push the funnel. This keeps the feed from feeling salesy
+# or desperate for a click. Rotation drives the mix so it varies post to post.
+#   curiosity — pure education, ends on a genuine question inviting comments (no link)
+#   engage    — micro-commitment: save/share/answer, or an interactive prompt (no link)
+#   funnel    — the soft CLARITY invitation (+ optional link) — the warm-lead capture
+_CTA_MODES = ["curiosity", "engage", "curiosity", "funnel", "curiosity", "engage"]
+
+
+def _select_cta(rotation: Optional[int]) -> str:
+    if rotation is None:
+        rotation = datetime.now(timezone.utc).timetuple().tm_yday
+    return _CTA_MODES[rotation % len(_CTA_MODES)]
+
+
 def _metric_angle(label: str) -> int:
     """Assign a verified metric to EXACTLY ONE angle (indices align to IBC_ANGLES),
     so each day's posts draw from non-overlapping data — no metric appears twice."""
@@ -244,8 +259,37 @@ async def _next_rotation(db: AsyncSession) -> int:
 
 
 def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
-                    angle: Optional[str] = None, figures: Optional[List[str]] = None) -> str:
+                    angle: Optional[str] = None, figures: Optional[List[str]] = None,
+                    cta_mode: str = "curiosity") -> str:
     spec = _brand_specs()[_resolve_brand(brand)]
+    kw = getattr(settings, "funnel_optin_keyword", "CLARITY")
+    url = getattr(settings, "funnel_quiz_url", "https://nxglifegroup.org/")
+
+    # NXG directive: lead with education + curiosity; only a minority of posts push the
+    # funnel, so the feed never feels salesy or desperate for a click. This block is the
+    # ONLY CTA guidance the model gets for this post — it rotates per `cta_mode`.
+    if cta_mode == "funnel":
+        cta_block = (
+            "CLOSE — SOFT WARM-LEAD INVITATION (this post is one of the few that captures a "
+            f"lead, so keep it human, never pushy): after the education lands, invite the "
+            f"reader to comment '{kw}' to get a free, no-pressure Retirement/Financial Clarity "
+            f"resource (a real person follows up only if they want). You MAY mention the link "
+            f"{url} once, softly. Do not stack multiple CTAs; one gentle invitation."
+        )
+    elif cta_mode == "engage":
+        cta_block = (
+            "CLOSE — MICRO-COMMITMENT (NO link, NO funnel keyword): end with a light, human "
+            "invitation to engage — e.g. 'Save this for when you need it,' 'Send this to "
+            "someone planning their retirement,' or a one-line question they can answer in "
+            "the comments. The goal is a small, natural action, not a sale."
+        )
+    else:  # curiosity (the default, most common)
+        cta_block = (
+            "CLOSE — CURIOSITY & CONVERSATION (NO link, NO funnel keyword, NO pitch): end on "
+            "a genuine, open question that makes the reader reflect and want to reply — the "
+            "kind of question a trusted advisor would ask, not a marketer. Leave them thinking, "
+            "not sold to."
+        )
 
     # Exact verified figures for this post's angle — the ONLY numbers the model may use.
     fig_block = ""
@@ -293,19 +337,21 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"IMAGE HEADLINE, so it must be that ONE angle-specific development stated as a "
             f"short, punchy, human line (<= 14 words) — never the Fed rate unless this is the "
             f"rates angle, never a generic slogan.\n\n"
+            f"You are an EDUCATOR, not a salesperson. This post's job is to make the reader "
+            f"feel understood and a little more informed — to earn trust, not to pitch. "
+            f"Hierarchy: TRUTH > TRUST > VALUE > CLARITY > ENGAGEMENT. Never sell a product, "
+            f"never imply guarantees, never use fear or fake urgency.\n\n"
             f"WRITE a single Facebook post that: (1) opens on a specific, real human moment "
-            f"or feeling tied to that development — a scene, not a chart; (2) names their "
-            f"quiet worry out loud; (3) shows you understand it; (4) offers the shift — how "
-            f"the right protection turns that worry into peace of mind, in plain words, as "
-            f"the SOLUTION; (5) closes with a warm, low-pressure invitation, NEVER a hard "
-            f"sell. 120-220 words, short paragraphs with line breaks, conversational, first "
-            f"or second person, zero jargon, no guarantees, and NEVER the sequence '--'.\n\n"
-            f"THE INVITATION (this is how we capture the lead — make it feel human, not "
-            f"salesy): invite the reader to comment the word '{kw}' and you'll send them "
-            f"the free Financial Clarity Assessment (a few questions, then a real person "
-            f"reaches out — no pressure). Also offer the direct link {url} for anyone who'd "
-            f"rather start now. Then end the caption with exactly: 'CA License #4490102 · "
-            f"Educational, not financial advice.'\n\n"
+            f"or feeling tied to that development — a scene, not a chart; (2) names the quiet "
+            f"question or worry it raises, out loud; (3) shows you genuinely understand it; "
+            f"(4) gives ONE real, useful thing to UNDERSTAND about it — plain-English insight "
+            f"or a question worth asking, framed as education (NOT 'here's how our product "
+            f"fixes it'); (5) closes per the CLOSE instruction below. 110-200 words, short "
+            f"paragraphs with line breaks, conversational, first or second person, zero "
+            f"jargon, no guarantees, and NEVER the sequence '--'.\n\n"
+            f"{cta_block}\n"
+            f"After the close, end the caption with exactly this on its own line: "
+            f"'CA License #4490102 · Educational, not financial advice.'\n\n"
             f"BRAND VOICE (obey):\n{spec['guidelines']}\n\n"
             f"Return ONLY a single-line JSON object with ALL FOUR keys present and non-empty: "
             f"{{\"facts\": [ the ONE specific real development this post is anchored on, "
@@ -342,12 +388,10 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"words), and one plain-language line on what it MEANS for the reader's money.\n\n"
             f"Also write: a scroll-stopping TITLE for the graphic (<= 6 words, e.g. 'TOP 3 "
             f"THINGS MOVING YOUR MONEY' or 'KEY ECONOMIC HEADLINES'); an Instagram CAPTION in "
-            f"an intelligent, analytical, confident voice (decode -> why it matters -> then "
-            f"the CTA); and relevant HASHTAGS.\n\n"
-            f"THE CTA (how we capture the lead): after the decode, invite the reader to "
-            f"comment '{kw}' to get a free, personalized Financial Clarity Assessment on what "
-            f"this means for their own money (a real person follows up, no pressure), and "
-            f"offer the link {url} to start now. Keep it confident and useful, never pushy.\n\n"
+            f"an intelligent, analytical, confident voice that DECODES the data and explains "
+            f"why it matters — teaching, not selling (TRUTH > TRUST > VALUE > CLARITY > "
+            f"ENGAGEMENT); and relevant HASHTAGS.\n\n"
+            f"{cta_block}\n\n"
             f"HARD RULES: use ONLY figures present in the intelligence — never invent a "
             f"number or a source; education, not individualized advice; no promised returns; "
             f"never the sequence '--'.\n\n"
@@ -488,6 +532,7 @@ class HotTopicReels:
         # Exact verified figures for THIS angle only — non-overlapping across the day,
         # and the sole numbers the model may use (kills cross-post repeats + drift).
         figures = _figures_for_angle(data_points, _angle_index(rotation)) if data_points else []
+        cta_mode = _select_cta(rotation)  # curiosity / engage / funnel — mostly education
         temperature = 0.7 if brand == "nxg" else 0.4
         if intel is None:
             intel = await self._latest_intel(db)
@@ -508,7 +553,7 @@ class HotTopicReels:
             try:
                 raw = await claude_client.chat(
                     messages=[{"role": "user", "content": prompt}],
-                    system_prompt=_compile_system(n, brand, tier, angle, figures),
+                    system_prompt=_compile_system(n, brand, tier, angle, figures, cta_mode),
                     stream=False,
                     max_tokens=settings.oreilus_report_max_tokens,
                     temperature=temperature,
@@ -563,6 +608,7 @@ class HotTopicReels:
             package["tier_label"] = tier["label"]
         if angle:  # record the economic angle so each post's topic is distinct + visible
             package["angle"] = angle
+        package["cta_mode"] = cta_mode  # curiosity / engage / funnel (education-first mix)
         # Valid if we have panels (IBC) or facts (others).
         if not package["facts"] and not clean_panels:
             return {"ok": False, "reason": "compile_failed", "brand": brand}
