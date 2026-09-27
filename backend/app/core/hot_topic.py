@@ -27,6 +27,7 @@ from ..config import settings
 from ..utils.logger import logger
 from .claude_client import claude_client
 from .finance_intel import finance_intel
+from .shared_memory import shared_memory
 from ..models.automation_state import AutomationState  # noqa: F401 (register table)
 from . import athena
 
@@ -165,6 +166,71 @@ def _select_angle(index: Optional[int] = None) -> str:
     return IBC_ANGLES[index % len(IBC_ANGLES)]
 
 
+# NXG directive §5 + §20: the CATEGORY of the day's posts follows a weekly rhythm
+# (Mon=0 .. Sun=6). Economic angle + income tier still vary per slot for within-day
+# distinctness, but the category sets each day's PURPOSE and structure.
+NXG_CONTENT_CATEGORIES = {
+    0: {"key": "intelligence", "name": "Breaking Financial Intelligence", "question": "What just changed?",
+        "guidance": "Decode a real, current development (Fed, inflation, Treasury yields, Social "
+                    "Security, taxes, banking, pensions, retirement regulations): what happened, what "
+                    "it means in plain English, who it affects. Attention + authority."},
+    1: {"key": "problem", "name": "Retirement Problem", "question": "What could go wrong?",
+        "guidance": "Surface ONE real retirement risk (longevity, inflation, sequence-of-returns, "
+                    "income gap, taxes, healthcare, Social Security timing, over-concentration) — the "
+                    "mistake people discover too late. Educate on WHY it happens. Never fear-monger, "
+                    "never pitch a product."},
+    2: {"key": "education", "name": "Retirement Education", "question": "How does this actually work?",
+        "guidance": "Teach ONE concept clearly (401k, 403b, IRA, Roth, pension, Social Security, "
+                    "annuities, life insurance, taxes, sequence risk, longevity, income planning). "
+                    "Problem -> options -> tradeoffs -> what to understand before deciding."},
+    3: {"key": "scenario", "name": "Scenario / Case Study", "question": "What would this look like?",
+        "guidance": "Use a clearly HYPOTHETICAL, anonymized person (age, assets, projected Social "
+                    "Security, goal) and walk through the planning QUESTIONS and tradeoffs — NOT "
+                    "personalized advice. State plainly that it is illustrative."},
+    4: {"key": "business", "name": "Business Owner Intelligence", "question": "How does this affect owners?",
+        "guidance": "Speak to business owners (40-65): succession, 'sell someday' as an exit "
+                    "assumption vs a real strategy, key-person risk, retirement outside the business, "
+                    "taxes, employee retirement (CalSavers). Educate; open a professional conversation."},
+    5: {"key": "interactive", "name": "Interactive", "question": "Your turn.",
+        "guidance": "A poll, quiz, or ONE sharp question that invites a reply (e.g. 'Your #1 "
+                    "retirement concern: running out of money / taxes / market crashes / healthcare?'). "
+                    "This is the lead-gen category — the close invites a comment."},
+    6: {"key": "recap", "name": "Weekly Intelligence Recap", "question": "What to know before Monday.",
+        "guidance": "Recap the week's most important VERIFIED developments — the 3 things that matter "
+                    "for retirement and money heading into next week. Tight and scannable."},
+}
+
+
+def _content_category(idx: Optional[int] = None) -> Dict:
+    """The day's content category (weekly rhythm), in the posting timezone."""
+    if idx is None:
+        try:
+            from zoneinfo import ZoneInfo
+            tzname = getattr(settings, "autopost_timezone", "America/Los_Angeles")
+            idx = datetime.now(ZoneInfo(tzname)).weekday()
+        except Exception:  # noqa: BLE001
+            idx = datetime.utcnow().weekday()
+    return NXG_CONTENT_CATEGORIES.get(idx % 7, NXG_CONTENT_CATEGORIES[0])
+
+
+# Compliance guardrail (NXG directive §24/§25): language that must never appear in
+# published copy (unsupported guarantees / hype). Scanned on every compiled post.
+_BANNED_PHRASES = [
+    "guaranteed return", "guaranteed returns", "guaranteed wealth", "guaranteed retirement",
+    "risk-free", "risk free", "foolproof", "get rich", "secret strategy",
+    "best investment", "no risk", "can't lose", "cannot lose", "100% safe",
+]
+
+
+def _compliance_scan(text: str) -> List[str]:
+    """Return a list of compliance issues found in copy (empty = clean)."""
+    low = (text or "").lower()
+    issues = [f"banned phrase: '{p}'" for p in _BANNED_PHRASES if p in low]
+    if "--" in (text or ""):
+        issues.append("forbidden sequence '--'")
+    return issues
+
+
 def _angle_index(rotation: Optional[int]) -> int:
     if rotation is None:
         rotation = datetime.now(timezone.utc).timetuple().tm_yday
@@ -260,10 +326,30 @@ async def _next_rotation(db: AsyncSession) -> int:
 
 def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
                     angle: Optional[str] = None, figures: Optional[List[str]] = None,
-                    cta_mode: str = "curiosity") -> str:
+                    cta_mode: str = "curiosity", category: Optional[Dict] = None) -> str:
     spec = _brand_specs()[_resolve_brand(brand)]
     kw = getattr(settings, "funnel_optin_keyword", "CLARITY")
     url = getattr(settings, "funnel_quiz_url", "https://nxglifegroup.org/")
+
+    # Weekly content category (the day's PURPOSE) + the non-negotiable trust & compliance
+    # rules — prepended to every post so all generated content follows the NXG standard.
+    category = category or _content_category()
+    category_block = (
+        f"TODAY'S CONTENT CATEGORY (weekly rhythm — this sets the post's PURPOSE and shape): "
+        f"{category['name']} — \"{category['question']}\"\n{category['guidance']}\n\n"
+    )
+    trust_rule = (
+        "TRUST RULE (never violate): do NOT write 'here's why our product is better.' "
+        "Instead — name the PROBLEM, lay out the OPTIONS, the TRADEOFFS, and what someone "
+        "should understand BEFORE deciding. You are an educator, not a salesperson.\n"
+    )
+    compliance_rule = (
+        "COMPLIANCE (hard rules): educational only, not individualized advice; never use "
+        "unsupported guarantee/hype language (guaranteed returns, risk-free, foolproof, best "
+        "investment, get rich, can't lose, 100% safe); attribute real sources; never invent a "
+        "figure, statistic, quote, or affiliation; never imply government endorsement; never "
+        "the sequence '--'.\n\n"
+    )
 
     # NXG directive: lead with education + curiosity; only a minority of posts push the
     # funnel, so the feed never feels salesy or desperate for a click. This block is the
@@ -313,9 +399,9 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
         return (
             f"You are the content voice of {spec['name']}, a licensed California life-"
             f"insurance & financial-protection agency. You do NOT write dry economic news or "
-            f"market analysis. You write raw, human, story-led Facebook posts that SOLVE a "
-            f"real person's problem and make them FEEL understood — that is how NXG earns "
-            f"a lead without ever pitching.\n\n"
+            f"market analysis. You write raw, human, story-led Facebook posts that EDUCATE and "
+            f"make a real person feel understood — that is how NXG earns trust without pitching.\n\n"
+            f"{category_block}{trust_rule}{compliance_rule}"
             f"TODAY YOU ARE WRITING FOR THIS PERSON:\n"
             f"- Tier: {tier['label']}\n"
             f"- Who they are: {tier['audience']}\n"
@@ -376,6 +462,7 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"business owners, and financially serious people. You decode what is happening "
             f"in the economy and what it MEANS for money decisions. You are NOT a consumer "
             f"life-insurance page and you do not write emotional family stories.\n\n"
+            f"{category_block}{trust_rule}{compliance_rule}"
             f"THIS POST'S ANGLE (focus the ENTIRE briefing on this theme, so it is distinct "
             f"from other posts today): {angle}.{fig_block}\n\n"
             f"Build a BRIEFING GRAPHIC of the {n} most impactful VERIFIED data points WITHIN "
@@ -533,6 +620,7 @@ class HotTopicReels:
         # and the sole numbers the model may use (kills cross-post repeats + drift).
         figures = _figures_for_angle(data_points, _angle_index(rotation)) if data_points else []
         cta_mode = _select_cta(rotation)  # curiosity / engage / funnel — mostly education
+        category = _content_category()    # weekly rhythm — the day's content category
         temperature = 0.7 if brand == "nxg" else 0.4
         if intel is None:
             intel = await self._latest_intel(db)
@@ -553,7 +641,7 @@ class HotTopicReels:
             try:
                 raw = await claude_client.chat(
                     messages=[{"role": "user", "content": prompt}],
-                    system_prompt=_compile_system(n, brand, tier, angle, figures, cta_mode),
+                    system_prompt=_compile_system(n, brand, tier, angle, figures, cta_mode, category),
                     stream=False,
                     max_tokens=settings.oreilus_report_max_tokens,
                     temperature=temperature,
@@ -609,9 +697,32 @@ class HotTopicReels:
         if angle:  # record the economic angle so each post's topic is distinct + visible
             package["angle"] = angle
         package["cta_mode"] = cta_mode  # curiosity / engage / funnel (education-first mix)
+        package["category"] = category.get("key")
+        package["category_name"] = category.get("name")
         # Valid if we have panels (IBC) or facts (others).
         if not package["facts"] and not clean_panels:
             return {"ok": False, "reason": "compile_failed", "brand": brand}
+
+        # Compliance gate (NXG directive §24/§25): scan the finished copy. Record any flags
+        # for the human/audit trail (recordkeeping) and, for NXG, ensure the required CA
+        # license + educational disclosure is present. Never hard-blocks autonomy.
+        scan_text = " ".join([package.get("caption", ""), " ".join(package.get("facts", []))])
+        issues = _compliance_scan(scan_text)
+        if brand == "nxg" and "4490102" not in package.get("caption", ""):
+            package["caption"] = (package["caption"].rstrip()
+                                  + "\n\nCA License #4490102 · Educational, not financial advice.")
+        if issues:
+            package["compliance_flags"] = issues
+            logger.warning(f"compliance flags on {brand} post: {issues}")
+            try:
+                await shared_memory.remember(
+                    db, content=f"Compliance flags on a {spec['name']} post: {issues}",
+                    kind="compliance_flag", actor="ORELIUS",
+                    meta={"brand": brand, "issues": issues, "caption": package.get("caption", "")[:500]},
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"compliance flag record failed: {e}")
+
         await self._save_package(db, package, brand)
         return {"ok": True, "package": package, "brand": brand}
 
