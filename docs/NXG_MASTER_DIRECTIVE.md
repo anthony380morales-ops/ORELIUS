@@ -37,6 +37,11 @@ Continuously find the weakest stage and strengthen it.
 - **Trust moat:** cite primary sources (Fed, Treasury, BLS, IRS, SSA, FDIC, CA Dept.
   of Insurance, CalPERS/CalSavers, LIMRA), then interpret in plain English. Never
   fabricate a figure, quote, or affiliation; never imply government endorsement.
+- **Visual standard:** every published post carries a fresh, unique, high-quality
+  generated background image (fal.ai) baked in, on-theme and realistic, with a
+  legibility scrim; centered text; brand logo in place of any text titling; no long
+  dashes. Never a flat or plain-background post. (See HIGGBOT's mandatory background
+  directive below.)
 - **Compliance gate** before publishing regulated content: factuality, source,
   timing, product mention, licensing, testimonial, performance/guarantee language,
   material risks, recordkeeping. When uncertain, flag for human review — do not guess.
@@ -80,6 +85,19 @@ Turns the package into the **visual**: cinematic human photo-hero for NXG (fal/F
 the multi-panel economic-intelligence briefing graphic for IBC, and future
 landing-page/creative assets. Premium, on-brand, centered, credible — never a
 data-dump, never a template with the prompt showing.
+
+**MANDATORY BACKGROUND DIRECTIVE (every post, no exceptions):** every single post
+that ATHENA/HIGGBOT publish — for NXG and IBC alike — MUST have a fresh, unique,
+high-quality generated background image (fal.ai) baked into the asset, behind the
+content, with a legibility scrim so text stays readable. "Fresh + unique" means a
+newly generated image per post (new seed every time); no reused or repeated
+backgrounds. The imagery is on-theme and realistic (NXG: cinematic human/American/
+financial scenes; IBC: economic-intelligence scenes — markets, energy, the Fed,
+trade — in cool teal/gold). No post ships flat or with a plain solid background. If
+generation is ever unavailable, a cinematic procedural scene stands in so the post
+still has a background and publishing is never blocked — but a real generated photo
+is the target on every post. Enforced in code in ATHENA's publish path
+(`accountPublish.ts` → `freshBackground()`); text is always centered.
 
 ### CRM / Automation layer (ManyChat + funnel, growing)
 Comment keyword `CLARITY` → auto-DM the free resource → landing page → capture →
