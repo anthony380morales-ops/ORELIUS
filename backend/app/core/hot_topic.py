@@ -242,16 +242,25 @@ def _compliance_scan(text: str) -> List[str]:
 # tightly-scoped model call fills the layout's structure from the SAME verified
 # figures; ATHENA renders it over a fresh financial-scene photo. Any failure falls
 # back to the photo-hero, so the proven caption/facts path is never at risk.
-_NXG_LAYOUTS = ["briefing", "comparison", "analysis", "news", "hero"]
 _ACCENTS = {"red", "blue", "gold", "green", "cyan"}
 _ICONS = {"shield", "coins", "bank", "person", "chart", "home"}
 
+# The day's CATEGORY (weekly rhythm) sets the NXG visual LAYOUT so the format matches
+# the day's purpose. All of a day's posts share the layout; angle + income tier still
+# vary per slot. Any layout that can't be built cleanly falls back to the photo-hero.
+_CATEGORY_LAYOUT = {
+    "intelligence": "briefing",    # Mon — Breaking Financial Intelligence (attention)
+    "problem": "hero",             # Tue — Retirement Problem (pain, human/story)
+    "education": "comparison",     # Wed — Retirement Education (how it works, options)
+    "scenario": "scenario",        # Thu — Scenario / Case Study (tangible)
+    "business": "analysis",        # Fri — Business Owner Intelligence (two-sided)
+    "interactive": "interactive",  # Sat — Interactive (poll / question, lead-gen)
+    "recap": "news",               # Sun — Weekly Intelligence Recap (headlines)
+}
 
-def _nxg_layout_for(rotation: int) -> str:
-    try:
-        return _NXG_LAYOUTS[int(rotation) % len(_NXG_LAYOUTS)]
-    except Exception:  # noqa: BLE001
-        return "hero"
+
+def _nxg_layout_for_category(category_key: Optional[str]) -> str:
+    return _CATEGORY_LAYOUT.get(str(category_key or ""), "hero")
 
 
 def _san_deep(x):
@@ -298,6 +307,19 @@ _LAYOUT_SCHEMA = {
         '"SHORT UPPERCASE","body":"one or two plain sentences","stats":[{"value":"3.4%","label":'
         '"CPI YoY"}]},"bigPicture":[{"value":"3.4%","label":"Inflation"}]}. 1-2 stats per story; '
         '3-4 bigPicture items.'
+    ),
+    "scenario": (
+        'a clearly HYPOTHETICAL, anonymized retirement case study. JSON: {"title":"SHORT UPPERCASE '
+        'QUESTION","personaName":"John","personaMeta":"Age 57 · California","stats":[{"value":"$650k",'
+        '"label":"401(k)"},{"value":"$2,800","label":"Est. Social Security"},{"value":"62","label":'
+        '"Target Retire Age"}],"questionsTitle":"THE QUESTIONS THAT DECIDE IT","questions":["one plain '
+        'planning question","another"],"takeaway":"one plain sentence"}. Invent a realistic but clearly '
+        'hypothetical person (first name only); 2-4 stat chips; 3-4 planning questions; never real advice.'
+    ),
+    "interactive": (
+        'a poll / one sharp question that invites a reply. JSON: {"eyebrow":"YOUR TURN","question":'
+        '"one sharp, plain question","options":["short option","short option"],"prompt":"Comment your '
+        'answer below."}. 0-4 short options (omit or empty for an open question); keep the question tight.'
     ),
 }
 
@@ -400,6 +422,30 @@ def _validate_layout(layout: str, obj: Dict) -> Optional[Dict]:
                 "bigPicture": [f for f in (o.get("bigPicture") or []) if isinstance(f, dict) and f.get("value")][:4],
             }
             return {"layout": "news", "news": nw}
+        if layout == "scenario":
+            qs = [str(q) for q in (o.get("questions") or []) if str(q).strip()][:4]
+            if not o.get("personaName") or not qs:
+                return None
+            sc = {
+                "title": str(o.get("title", "") or ""),
+                "personaName": str(o.get("personaName", "") or ""),
+                "personaMeta": str(o.get("personaMeta", "") or ""),
+                "stats": [s for s in (o.get("stats") or []) if isinstance(s, dict) and s.get("value")][:4],
+                "questionsTitle": str(o.get("questionsTitle", "") or ""),
+                "questions": qs,
+                "takeaway": str(o.get("takeaway", "") or ""),
+            }
+            return {"layout": "scenario", "scenario": sc}
+        if layout == "interactive":
+            if not str(o.get("question", "")).strip():
+                return None
+            iv = {
+                "eyebrow": str(o.get("eyebrow", "") or ""),
+                "question": str(o.get("question", "") or ""),
+                "options": [str(x) for x in (o.get("options") or []) if str(x).strip()][:4],
+                "prompt": str(o.get("prompt", "") or ""),
+            }
+            return {"layout": "interactive", "interactive": iv}
     except Exception:  # noqa: BLE001
         return None
     return None
@@ -911,7 +957,7 @@ class HotTopicReels:
         # fill its structure in a separate, tightly-scoped call. On any failure fall back
         # to the photo-hero — the proven caption/facts above are never affected.
         if brand == "nxg":
-            layout = _nxg_layout_for(rotation)
+            layout = _nxg_layout_for_category(category.get("key"))
             attach = None
             if layout != "hero":
                 try:
@@ -928,7 +974,7 @@ class HotTopicReels:
         # for the human/audit trail (recordkeeping) and, for NXG, ensure the required CA
         # license + educational disclosure is present. Never hard-blocks autonomy.
         layout_text = json.dumps(
-            {k: package.get(k) for k in ("briefing", "compareColumns", "analysis", "news") if package.get(k)},
+            {k: package.get(k) for k in ("briefing", "compareColumns", "analysis", "news", "scenario", "interactive") if package.get(k)},
             ensure_ascii=False,
         )
         scan_text = " ".join([package.get("caption", ""), " ".join(package.get("facts", [])), layout_text])
@@ -1032,6 +1078,8 @@ class HotTopicReels:
                 **({"compareColumns": package["compareColumns"]} if package.get("compareColumns") else {}),
                 **({"analysis": package["analysis"]} if package.get("analysis") else {}),
                 **({"news": package["news"]} if package.get("news") else {}),
+                **({"scenario": package["scenario"]} if package.get("scenario") else {}),
+                **({"interactive": package["interactive"]} if package.get("interactive") else {}),
             },
         }
         if use_solo:
