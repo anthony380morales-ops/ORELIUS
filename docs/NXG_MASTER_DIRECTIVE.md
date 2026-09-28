@@ -42,6 +42,13 @@ Continuously find the weakest stage and strengthen it.
   legibility scrim; centered text; brand logo in place of any text titling; no long
   dashes. Never a flat or plain-background post. (See HIGGBOT's mandatory background
   directive below.)
+- **Format rotation:** NXG posts rotate through rich infographic layouts so the feed
+  never looks repetitive — *briefing* (numbered stat sections), *comparison* (4 tool
+  columns, pros/cons), *analysis* (stacks-up vs overreaches), *news* (two headlines +
+  big picture), and the cinematic *photo-hero*. ORELIUS picks the layout per post and
+  fills its structure from the same verified figures; if a layout can't be built
+  cleanly it falls back to the photo-hero. IBC publishes the multi-panel intelligence
+  briefing. Every layout, both brands, gets the mandatory generated background.
 - **Compliance gate** before publishing regulated content: factuality, source,
   timing, product mention, licensing, testimonial, performance/guarantee language,
   material risks, recordkeeping. When uncertain, flag for human review — do not guess.

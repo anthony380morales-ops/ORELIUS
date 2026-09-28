@@ -237,6 +237,197 @@ def _compliance_scan(text: str) -> List[str]:
     return issues
 
 
+# --- Rich NXG infographic layouts -------------------------------------------------
+# Every NXG post rotates a visual LAYOUT so the Facebook feed varies. A second,
+# tightly-scoped model call fills the layout's structure from the SAME verified
+# figures; ATHENA renders it over a fresh financial-scene photo. Any failure falls
+# back to the photo-hero, so the proven caption/facts path is never at risk.
+_NXG_LAYOUTS = ["briefing", "comparison", "analysis", "news", "hero"]
+_ACCENTS = {"red", "blue", "gold", "green", "cyan"}
+_ICONS = {"shield", "coins", "bank", "person", "chart", "home"}
+
+
+def _nxg_layout_for(rotation: int) -> str:
+    try:
+        return _NXG_LAYOUTS[int(rotation) % len(_NXG_LAYOUTS)]
+    except Exception:  # noqa: BLE001
+        return "hero"
+
+
+def _san_deep(x):
+    """Sanitize every string in a nested structure (no long dashes, ATHENA-safe)."""
+    if isinstance(x, str):
+        return _sanitize_for_athena(x)
+    if isinstance(x, list):
+        return [_san_deep(i) for i in x]
+    if isinstance(x, dict):
+        return {k: _san_deep(v) for k, v in x.items()}
+    return x
+
+
+_LAYOUT_SCHEMA = {
+    "briefing": (
+        'a numbered economic-briefing infographic. JSON: {"heroNumber":"2","heroTitle":'
+        '"SHORT UPPERCASE HOOK","heroSub":"WHAT IT MEANS FOR YOU","intro":"one plain sentence",'
+        '"sections":[{"accent":"red","title":"SHORT UPPERCASE","stats":[{"value":"+3.4%",'
+        '"label":"CPI YoY","unit":"optional","sub":"optional second figure"}],"source":"BLS",'
+        '"bottomLine":"one plain takeaway sentence"}],"footerItems":[{"value":"3.4%","label":'
+        '"Inflation"}]}. EXACTLY 2 sections; 1-2 stats each; accents from red/blue/gold/green/cyan;'
+        ' 3-4 footerItems.'
+    ),
+    "comparison": (
+        'a 4-column financial-tools comparison. JSON: {"columns":[{"icon":"shield","name":'
+        '"LIFE INSURANCE","sub":"(Whole, Term, IUL)","pros":["short line","short line"],"cons":'
+        '["short line","short line"]}]}. EXACTLY 4 columns covering Life Insurance, Annuities, '
+        'Bank Savings, and Retirement (401k/IRA). icon from shield/coins/bank/person/chart/home; '
+        '2-3 short pros and 2-3 short cons each. Educator tone: options and tradeoffs, never '
+        '"ours is better".'
+    ),
+    "analysis": (
+        'a two-column honest analysis. JSON: {"title":"SHORT UPPERCASE","subtitle":"one plain '
+        'line","topStats":[{"value":"4.98%","label":"10-Yr Treasury","sub":"optional"}],'
+        '"leftPoints":[{"label":"bold claim","note":"one plain line"}],"rightPoints":[{"label":'
+        '"bold claim","note":"one plain line"}],"realValuePoints":["short","short"]}. leftPoints '
+        '= where it genuinely helps; rightPoints = where the common story overreaches; 2-3 each; '
+        '0-3 topStats; 2-3 realValuePoints.'
+    ),
+    "news": (
+        'a two-headline economic-news card. JSON: {"title":"KEY ECONOMIC HEADLINES","subtitle":'
+        '"one plain line","left":{"headline":"SHORT UPPERCASE","body":"one or two plain sentences",'
+        '"stats":[{"value":"7,673","label":"S&P 500","delta":"-0.48%"}]},"right":{"headline":'
+        '"SHORT UPPERCASE","body":"one or two plain sentences","stats":[{"value":"3.4%","label":'
+        '"CPI YoY"}]},"bigPicture":[{"value":"3.4%","label":"Inflation"}]}. 1-2 stats per story; '
+        '3-4 bigPicture items.'
+    ),
+}
+
+
+def _layout_system(layout: str, figures: List[str]) -> str:
+    fig_block = ("Use ONLY these verified figures (never invent a number or source): "
+                 + "; ".join(str(f) for f in figures)) if figures else \
+        "Use ONLY figures explicitly present in the intelligence; never invent a number or source."
+    return (
+        "You are ORELIUS's visual-content builder for NXG Life Group, a trusted financial and "
+        "retirement EDUCATION brand. Build ONLY the JSON for " + _LAYOUT_SCHEMA[layout] + "\n\n"
+        + fig_block + "\n\n"
+        "HARD RULES: education only, not individualized advice; no guarantees or hype; attribute "
+        "real sources; keep every line tight, plain, and scroll-stopping; NEVER use a double hyphen "
+        "or any long dash (no '--', no em dash, no en dash), use commas or periods. Return ONLY the "
+        "single-line JSON object, all keys present, no markdown, no code fences, no text before or "
+        "after; inside strings use \\n for any line break, never a raw newline."
+    )
+
+
+def _parse_layout_json(raw: str) -> Optional[Dict]:
+    s = (raw or "").strip()
+    if s.startswith("```"):
+        s = s.strip("`")
+        s = s[s.find("{"):] if "{" in s else s
+    a, b = s.find("{"), s.rfind("}")
+    if a == -1 or b == -1 or b <= a:
+        return None
+    try:
+        obj = json.loads(s[a:b + 1])
+        return obj if isinstance(obj, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _validate_layout(layout: str, obj: Dict) -> Optional[Dict]:
+    """Validate + clamp + sanitize the model's layout JSON. Returns the attach dict
+    ({"layout":..., <payload key>:...}) or None if the shape is unusable."""
+    try:
+        o = _san_deep(obj)
+        if layout == "briefing":
+            secs = [s for s in (o.get("sections") or []) if isinstance(s, dict) and s.get("title") and (s.get("stats") or [])][:2]
+            if not secs:
+                return None
+            for i, s in enumerate(secs):
+                if s.get("accent") not in _ACCENTS:
+                    s["accent"] = "red" if i == 0 else "blue"
+                s["stats"] = [st for st in (s.get("stats") or []) if isinstance(st, dict) and st.get("value")][:2]
+            bf = {
+                "heroNumber": str(o.get("heroNumber", "") or ""),
+                "heroTitle": str(o.get("heroTitle", "") or ""),
+                "heroSub": str(o.get("heroSub", "") or ""),
+                "intro": str(o.get("intro", "") or ""),
+                "sections": secs,
+                "footerItems": [f for f in (o.get("footerItems") or []) if isinstance(f, dict) and f.get("value")][:4],
+            }
+            return {"layout": "briefing", "briefing": bf}
+        if layout == "comparison":
+            cols = []
+            for i, c in enumerate((o.get("columns") or [])[:4]):
+                if not isinstance(c, dict) or not c.get("name"):
+                    continue
+                if c.get("icon") not in _ICONS:
+                    c["icon"] = ["shield", "coins", "bank", "person"][i % 4]
+                c["pros"] = [str(p) for p in (c.get("pros") or []) if str(p).strip()][:4]
+                c["cons"] = [str(p) for p in (c.get("cons") or []) if str(p).strip()][:4]
+                if c["pros"] and c["cons"]:
+                    cols.append(c)
+            if len(cols) < 2:
+                return None
+            return {"layout": "comparison", "compareColumns": cols}
+        if layout == "analysis":
+            lp = [p for p in (o.get("leftPoints") or []) if isinstance(p, dict) and p.get("label")][:4]
+            rp = [p for p in (o.get("rightPoints") or []) if isinstance(p, dict) and p.get("label")][:4]
+            if not lp or not rp:
+                return None
+            an = {
+                "title": str(o.get("title", "") or ""),
+                "subtitle": str(o.get("subtitle", "") or ""),
+                "topStats": [s for s in (o.get("topStats") or []) if isinstance(s, dict) and s.get("value")][:3],
+                "leftTitle": str(o.get("leftTitle", "") or ""),
+                "leftPoints": lp,
+                "rightTitle": str(o.get("rightTitle", "") or ""),
+                "rightPoints": rp,
+                "realValueTitle": str(o.get("realValueTitle", "") or ""),
+                "realValuePoints": [str(p) for p in (o.get("realValuePoints") or []) if str(p).strip()][:3],
+            }
+            return {"layout": "analysis", "analysis": an}
+        if layout == "news":
+            left, right = o.get("left"), o.get("right")
+            if not (isinstance(left, dict) and left.get("headline") and isinstance(right, dict) and right.get("headline")):
+                return None
+            for s in (left, right):
+                s["body"] = str(s.get("body", "") or "")
+                s["stats"] = [st for st in (s.get("stats") or []) if isinstance(st, dict) and st.get("value")][:3]
+            nw = {
+                "title": str(o.get("title", "") or ""),
+                "subtitle": str(o.get("subtitle", "") or ""),
+                "left": left, "right": right,
+                "bigPicture": [f for f in (o.get("bigPicture") or []) if isinstance(f, dict) and f.get("value")][:4],
+            }
+            return {"layout": "news", "news": nw}
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+async def _compile_nxg_layout(layout: str, intel: str, figures: List[str], temperature: float) -> Optional[Dict]:
+    """One tightly-scoped model call to build a layout's structure. None on any issue."""
+    prompt = ("From this compiled economic intelligence, build the layout JSON per your rules:\n\n" + intel)
+    for _ in range(2):
+        try:
+            raw = await claude_client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=_layout_system(layout, figures),
+                stream=False,
+                max_tokens=settings.oreilus_report_max_tokens,
+                temperature=temperature,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"nxg layout compile call failed: {e}")
+            continue
+        obj = _parse_layout_json(raw)
+        if obj:
+            cleaned = _validate_layout(layout, obj)
+            if cleaned:
+                return cleaned
+    return None
+
+
 def _angle_index(rotation: Optional[int]) -> int:
     if rotation is None:
         rotation = datetime.now(timezone.utc).timetuple().tm_yday
@@ -716,10 +907,31 @@ class HotTopicReels:
         if not package["facts"] and not clean_panels:
             return {"ok": False, "reason": "compile_failed", "brand": brand}
 
+        # NXG rich layout: rotate a visual FORMAT (briefing/comparison/analysis/news) and
+        # fill its structure in a separate, tightly-scoped call. On any failure fall back
+        # to the photo-hero — the proven caption/facts above are never affected.
+        if brand == "nxg":
+            layout = _nxg_layout_for(rotation)
+            attach = None
+            if layout != "hero":
+                try:
+                    attach = await _compile_nxg_layout(layout, intel, figures, temperature)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"nxg layout '{layout}' failed, using hero: {e}")
+            if attach:
+                package.update(attach)
+                logger.info(f"nxg post layout: {attach.get('layout')}")
+            else:
+                package["layout"] = "hero"
+
         # Compliance gate (NXG directive §24/§25): scan the finished copy. Record any flags
         # for the human/audit trail (recordkeeping) and, for NXG, ensure the required CA
         # license + educational disclosure is present. Never hard-blocks autonomy.
-        scan_text = " ".join([package.get("caption", ""), " ".join(package.get("facts", []))])
+        layout_text = json.dumps(
+            {k: package.get(k) for k in ("briefing", "compareColumns", "analysis", "news") if package.get(k)},
+            ensure_ascii=False,
+        )
+        scan_text = " ".join([package.get("caption", ""), " ".join(package.get("facts", [])), layout_text])
         issues = _compliance_scan(scan_text)
         if brand == "nxg" and "4490102" not in package.get("caption", ""):
             package["caption"] = (package["caption"].rstrip()
@@ -813,6 +1025,13 @@ class HotTopicReels:
                 # IBC intelligence-briefing graphic (multi-panel). Present for IBC only.
                 "panels": package.get("panels", []),
                 "title": package.get("title", ""),
+                # NXG rich-format routing + structure (ATHENA renders the matching card,
+                # else the photo-hero). Only the keys that were compiled are sent.
+                **({"layout": package["layout"]} if package.get("layout") else {}),
+                **({"briefing": package["briefing"]} if package.get("briefing") else {}),
+                **({"compareColumns": package["compareColumns"]} if package.get("compareColumns") else {}),
+                **({"analysis": package["analysis"]} if package.get("analysis") else {}),
+                **({"news": package["news"]} if package.get("news") else {}),
             },
         }
         if use_solo:
