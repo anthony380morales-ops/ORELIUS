@@ -34,16 +34,21 @@ from . import athena
 import re
 
 # ATHENA hard-rejects any caption containing the sequence "--" (its autonomous-text
-# guardrail) and returns published:false WITHOUT posting. A compiled caption that
-# happens to contain a double hyphen would therefore be SILENTLY declined at publish
-# time. Normalize any run of 2+ hyphens to a real em dash before the package is ever
-# stored or dispatched, so ORELIUS never emits content ATHENA will refuse.
-_DOUBLE_HYPHEN = re.compile(r"-{2,}")
+# guardrail) and returns published:false WITHOUT posting. Beyond that, the brand rule
+# is NO long dashes at all in published copy. So before a package is ever stored or
+# dispatched, replace every double(+) hyphen, em dash, and en dash with a comma.
+# Single hyphens inside words/ranges (year-over-year, 3.75-4%) are preserved.
+_LONG_DASH = re.compile(r"\s*(?:-{2,}|[—–])\s*")
 
 
 def _sanitize_for_athena(text: str) -> str:
-    """Make compiled text safe for ATHENA's publish guardrails (no '--' sequence)."""
-    return _DOUBLE_HYPHEN.sub("—", (text or "")).strip()
+    """Make compiled text safe for ATHENA's guardrails and the brand's no-dash rule:
+    replace every long/double/em/en dash with a comma (never emit a dash), then tidy
+    the resulting punctuation. Single hyphens inside words/ranges are preserved."""
+    s = _LONG_DASH.sub(", ", (text or ""))
+    s = re.sub(r"\s+,", ",", s)        # no space before a comma
+    s = re.sub(r"(,\s*){2,}", ", ", s) # collapse doubled commas
+    return s.strip().strip(",").strip()
 
 
 # The two accounts ORELIUS builds for. Each is a DISTINCT brand with its own voice,
@@ -226,8 +231,9 @@ def _compliance_scan(text: str) -> List[str]:
     """Return a list of compliance issues found in copy (empty = clean)."""
     low = (text or "").lower()
     issues = [f"banned phrase: '{p}'" for p in _BANNED_PHRASES if p in low]
-    if "--" in (text or ""):
-        issues.append("forbidden sequence '--'")
+    t = text or ""
+    if "--" in t or "—" in t or "–" in t:
+        issues.append("forbidden dash (double hyphen / em dash / en dash)")
     return issues
 
 
@@ -347,8 +353,9 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
         "COMPLIANCE (hard rules): educational only, not individualized advice; never use "
         "unsupported guarantee/hype language (guaranteed returns, risk-free, foolproof, best "
         "investment, get rich, can't lose, 100% safe); attribute real sources; never invent a "
-        "figure, statistic, quote, or affiliation; never imply government endorsement; never "
-        "the sequence '--'.\n\n"
+        "figure, statistic, quote, or affiliation; never imply government endorsement; "
+        "NEVER use a double hyphen or any long dash (no '--', no em dash, no en dash). "
+        "Use commas or periods instead.\n\n"
     )
 
     # NXG directive: lead with education + curiosity; only a minority of posts push the
@@ -434,7 +441,8 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"or a question worth asking, framed as education (NOT 'here's how our product "
             f"fixes it'); (5) closes per the CLOSE instruction below. 110-200 words, short "
             f"paragraphs with line breaks, conversational, first or second person, zero "
-            f"jargon, no guarantees, and NEVER the sequence '--'.\n\n"
+            f"jargon, no guarantees, and NEVER a double hyphen or any long dash (no '--', "
+            f"no em dash, no en dash); use commas or periods instead.\n\n"
             f"{cta_block}\n"
             f"After the close, end the caption with exactly this on its own line: "
             f"'CA License #4490102 · Educational, not financial advice.'\n\n"
@@ -481,7 +489,8 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"{cta_block}\n\n"
             f"HARD RULES: use ONLY figures present in the intelligence — never invent a "
             f"number or a source; education, not individualized advice; no promised returns; "
-            f"never the sequence '--'.\n\n"
+            f"never a double hyphen or any long dash (no '--', no em dash, no en dash); use "
+            f"commas or periods instead.\n\n"
             f"BRAND VOICE:\n{spec['guidelines']}\n\n"
             f"Return ONLY a single-line JSON object with ALL keys present and non-empty: "
             f"{{\"title\": \"the graphic title\", \"panels\": [ {{\"figure\": \"e.g. 3.4%\", "
