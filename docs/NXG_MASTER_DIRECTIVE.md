@@ -37,6 +37,17 @@ Continuously find the weakest stage and strengthen it.
 - **Trust moat:** cite primary sources (Fed, Treasury, BLS, IRS, SSA, FDIC, CA Dept.
   of Insurance, CalPERS/CalSavers, LIMRA), then interpret in plain English. Never
   fabricate a figure, quote, or affiliation; never imply government endorsement.
+- **Sourcing & variety (never a one-note feed):** ORELIUS pulls fresh daily intel by
+  first checking **CNBC (cnbc.com)** for the day's new economic/markets/personal-finance
+  articles, then sweeping reputable press (Reuters, AP, WSJ, Bloomberg, MarketWatch,
+  Kiplinger) and official/primary sources (Fed, BLS, Treasury, BEA, SSA, IRS). When the
+  usual data endpoints show nothing new, it uses **verified web search** for real,
+  cited, factual developments — never fabricating or padding with the same story. The
+  content is **NOT** limited to the Fed and rate changes: it rotates a wide theme set
+  (rates, inflation, jobs/wages, housing, markets, debt/credit, Social Security, taxes
+  & retirement rules, banking, business) so no two posts repeat, and it never leads
+  with the Fed every day. ORELIUS, ATHENA, and HIGGBOT all follow the weekly category
+  rhythm below.
 - **Visual standard:** every published post carries a fresh, unique, high-quality
   generated background image (fal.ai) baked in, on-theme and realistic, with a
   legibility scrim; centered text; brand logo in place of any text titling; no long

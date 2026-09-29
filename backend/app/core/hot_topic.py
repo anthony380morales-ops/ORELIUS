@@ -162,6 +162,12 @@ IBC_ANGLES = [
     "jobs & the broader economy — employment, GDP, consumer spending, recession signals",
     "markets & yields — Treasury yields, stocks, bonds, where safe money earns today",
     "debt & banking — national debt, deficits, bank stability, FDIC, where big money parks",
+    # News-driven themes (no fixed FRED metric) — pulled from CNBC + verified web each day,
+    # so the feed diversifies well beyond Fed/rates and stays timely.
+    "Social Security & retirement policy — benefits, COLA, claiming age, solvency, what retirees rely on",
+    "taxes & retirement rules — IRS limits, Roth vs traditional, RMDs, and legislation affecting savers",
+    "consumer credit & household finance — credit-card and loan debt, savings behavior, real wages",
+    "business & small business — corporate earnings, hiring, succession, owner finances, commercial credit",
 ]
 
 
@@ -652,17 +658,18 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"- The worry they carry: {tier['emotional_core']}\n"
             f"- How NXG solves it: {tier['product_angle']}\n"
             f"- What matters to them: {tier['promise']}\n\n"
-            f"THIS POST'S ECONOMIC ANCHOR (so every post today is DISTINCT): {angle}.\n"
-            f"Your anchor MUST be ONE specific development FROM THE VERIFIED FIGURES BELOW for "
-            f"this angle — that exact figure is the true-life reason this post exists today. "
-            f"HARD RULE: do NOT anchor on the Federal Reserve rate decision / fed funds rate "
-            f"UNLESS this post's angle is literally interest rates & the Fed. Every other angle "
-            f"(markets & yields, inflation, housing, jobs, debt & banking) must lead with ITS "
-            f"OWN figure — e.g. markets → the 10-yr Treasury or S&P level; debt → the national "
-            f"debt or a credit spread; inflation → the CPI reading; housing → the mortgage "
-            f"rate. Two posts must never share the same anchor figure. Weave that single real "
-            f"fact in naturally, in plain human words — the spark, not a lecture. Do NOT list "
-            f"multiple stats, and NEVER invent a number.{fig_block}\n\n"
+            f"THIS POST'S TOPIC (so every post today is DISTINCT): {angle}.\n"
+            f"Your anchor is ONE specific, verified development for THIS topic: use an exact "
+            f"figure from the VERIFIED FIGURES BELOW when listed; if none are listed for this "
+            f"topic, anchor on one specific, recent, verified development from the intelligence "
+            f"above (a real figure or fact WITH its source, e.g. CNBC, Treasury, BLS, SSA, IRS) "
+            f"and never invent one. HARD RULE: do NOT anchor on the Federal Reserve / fed funds "
+            f"rate UNLESS this post's topic is literally interest rates & the Fed. The economy is "
+            f"much bigger than the Fed — Social Security, taxes and retirement rules, household "
+            f"debt, housing, jobs, markets, and business news are all fair game, and the feed "
+            f"must NOT sound like the same rate story every day. Two posts must never share the "
+            f"same anchor. Weave that single real fact in naturally, in plain human words — the "
+            f"spark, not a lecture. Do NOT list multiple stats, and NEVER invent a number.{fig_block}\n\n"
             f"CRITICAL: the FIRST item in your \"facts\" array is used verbatim as the post's "
             f"IMAGE HEADLINE, so it must be that ONE angle-specific development stated as a "
             f"short, punchy, human line (<= 14 words) — never the Fed rate unless this is the "

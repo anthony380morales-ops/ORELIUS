@@ -265,9 +265,12 @@ class Settings(BaseSettings):
     # unrestricted (still reputable-instructed, cited) search if any domain is
     # rejected, so the brief never comes back empty.
     finance_news_domains: list[str] = [
-        "cnbc.com", "bloomberg.com", "morningstar.com", "investopedia.com",
+        # Press — CNBC first (daily economic/markets/personal-finance articles), then wire services.
+        "cnbc.com", "reuters.com", "apnews.com", "wsj.com", "bloomberg.com",
+        "marketwatch.com", "kiplinger.com", "morningstar.com", "investopedia.com",
+        # Official / primary sources (verified data + rules).
         "federalreserve.gov", "bls.gov", "treasury.gov", "bea.gov", "irs.gov",
-        "sec.gov", "spglobal.com", "moodys.com", "limra.com", "iii.org", "naic.org",
+        "ssa.gov", "sec.gov", "spglobal.com", "moodys.com", "limra.com", "iii.org", "naic.org",
     ]
 
     # --- NXG Life Group funnel intelligence (leads + site traffic) ---
