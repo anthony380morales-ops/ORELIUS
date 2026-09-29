@@ -8,16 +8,42 @@ LUCIUS calls these to keep a common memory with ORELIUS:
 Machine-to-machine auth via the `X-Shared-Secret` header, which must equal the
 LUCIUS_SHARED_SECRET configured on ORELIUS. (No JWT — this is a service link.)
 """
+import re
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_db
 from ...core.shared_memory import shared_memory
+from ...core.memory_manager import memory_manager
+from ...models.conversation import MessageRole, MessageSource
 from ...config import settings
 from ...utils.logger import logger
 
 router = APIRouter()
+
+
+def _master_id() -> str:
+    ids = getattr(settings, "allowed_login_ids", []) or []
+    return ids[0] if ids else "anthony"
+
+
+async def _surface_ibc_handoff(db: AsyncSession, kind: str, content: str) -> None:
+    """When ATHENA reports an IBC manual hand-off (prepare-only), drop the raw
+    reel/image link + caption straight into the Master's conversation. This is the
+    RELIABLE delivery channel for the daily Instagram link — it does not depend on
+    ATHENA's SMTP being configured, so a link is never silently lost. Never raises."""
+    if (kind or "") != "design_result" or "IBC HAND-OFF READY" not in (content or ""):
+        return
+    block = content[content.find("IBC HAND-OFF READY"):]
+    # Drop a trailing " | N file(s): ..." bit the bridge may append after the caption.
+    block = re.split(r"\s\|\s\d+ file\(s\):", block)[0].strip()
+    message = (
+        "📸 IBC Instagram post is ready to publish MANUALLY (add your Instagram-library "
+        "audio in the app). Raw direct link + caption below:\n\n" + block
+    )
+    conv = await memory_manager.get_or_create_conversation(db, _master_id(), MessageSource.WEB)
+    await memory_manager.add_message(db, conv.id, MessageRole.ASSISTANT, message)
 
 
 class MemoryEventIn(BaseModel):
@@ -53,6 +79,11 @@ async def write_memory(
         meta=event.meta,
     )
     logger.info(f"Shared memory write from {saved['actor']} ({saved['kind']})")
+    # Reliable in-app delivery of the daily IBC manual-post link (SMTP-independent).
+    try:
+        await _surface_ibc_handoff(db, event.kind, event.content)
+    except Exception as e:  # noqa: BLE001 - surfacing must never break the ingest
+        logger.debug(f"IBC hand-off surfacing skipped: {e}")
     return {"ok": True, "event": saved}
 
 
