@@ -94,9 +94,16 @@ every publish result is written here for audit and attribution.
 
 ### ATHENA — Content operating system & publisher
 Takes ORELIUS's package, renders the account's own branded asset, hosts it (R2),
-runs the quality/compliance gate, and **publishes to the correct account/platform**
-(NXG → Facebook, IBC/@ibluezcluezflow → Instagram), reporting the result back
-through LUCIUS. Enforces per-account daily limits and the "never wrong-brand" rule.
+runs the quality/compliance gate, and **publishes to the correct account/platform**,
+reporting the result back through LUCIUS. Enforces per-account daily limits and the
+"never wrong-brand" rule.
+- **NXG → Facebook:** fully auto-published on schedule.
+- **IBC → Instagram (reel, hand-off):** because Instagram's in-app licensed music
+  can't be attached via the API, IBC runs in PREPARE-ONLY mode — ATHENA builds the
+  5-second reel (silent) + caption, hosts it (R2), and **emails the raw direct link**
+  for the human to post MANUALLY in the app and add Instagram-library audio. Not
+  auto-published. (Toggle `IBC_PREPARE_ONLY=false` to auto-publish silent/baked-audio
+  reels instead.)
 
 ### HIGGBOT — Creative production
 Turns the package into the **visual**: cinematic human photo-hero for NXG (fal/Flux),
