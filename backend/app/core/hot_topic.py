@@ -575,7 +575,8 @@ async def _next_rotation(db: AsyncSession) -> int:
 
 def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
                     angle: Optional[str] = None, figures: Optional[List[str]] = None,
-                    cta_mode: str = "curiosity", category: Optional[Dict] = None) -> str:
+                    cta_mode: str = "curiosity", category: Optional[Dict] = None,
+                    avoid: Optional[List[str]] = None) -> str:
     spec = _brand_specs()[_resolve_brand(brand)]
     kw = getattr(settings, "funnel_optin_keyword", "CLARITY")
     url = getattr(settings, "funnel_quiz_url", "https://nxglifegroup.org/")
@@ -635,6 +636,17 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             "Use each EXACTLY as written (same value, same rounding). Do NOT invent, "
             "estimate, re-round, or add any figure not in this list, and do NOT reuse a "
             "generic headline number that isn't here:\n" + "\n".join(f"• {f}" for f in figures)
+        )
+
+    # Cross-day NOVELTY: the exact figures/headlines/angles that already ran in the last
+    # few days. The model must NOT repeat them, so the feed stops looping the same stats.
+    avoid_block = ""
+    if avoid:
+        avoid_block = (
+            "\n\nNOVELTY (do NOT repeat recent posts): these figures, headlines, and angles "
+            "ALREADY RAN in the last few days. Do NOT reuse any of them, do NOT lead with the "
+            "same numbers, and deliberately choose a DIFFERENT set of data points and a fresh "
+            "angle so the feed never loops:\n" + "\n".join(f"• {a}" for a in avoid[:24])
         )
 
     # NXG is story-first and problem-first, NOT an economic-fact compiler. It uses the
@@ -716,7 +728,7 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"life-insurance page and you do not write emotional family stories.\n\n"
             f"{category_block}{trust_rule}{compliance_rule}"
             f"THIS POST'S ANGLE (focus the ENTIRE briefing on this theme, so it is distinct "
-            f"from other posts today): {angle}.{fig_block}\n\n"
+            f"from other posts today): {angle}.{fig_block}{avoid_block}\n\n"
             f"Build a BRIEFING GRAPHIC of the {n} most impactful VERIFIED data points WITHIN "
             f"THAT ANGLE"
             + (", drawn ONLY from the verified figures listed above" if figures else
@@ -724,12 +736,21 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             + f". For EACH point give: the hard "
             f"FIGURE (the exact number/percent/level), a short LABEL "
             f"(e.g. 'CPI · YoY', '10-YR TREASURY', 'FED FUNDS'), a punchy HEADLINE (3-6 "
-            f"words), and one plain-language line on what it MEANS for the reader's money.\n\n"
-            f"Also write: a scroll-stopping TITLE for the graphic (<= 6 words, e.g. 'TOP 3 "
-            f"THINGS MOVING YOUR MONEY' or 'KEY ECONOMIC HEADLINES'); an Instagram CAPTION in "
-            f"an intelligent, analytical, confident voice that DECODES the data and explains "
-            f"why it matters — teaching, not selling (TRUTH > TRUST > VALUE > CLARITY > "
-            f"ENGAGEMENT); and relevant HASHTAGS.\n\n"
+            f"words), and one line on what it MEANS.\n\n"
+            f"DEPTH (make it PROFOUND, not a number dump): the {n} data points must together "
+            f"prove ONE non-obvious THESIS about where money is moving and why — the throughline "
+            f"a sharp analyst would draw, not three disconnected stats. For EACH point, the MEANING "
+            f"line must deliver a SECOND-ORDER implication — what it triggers next, the trade-off it "
+            f"forces, or what sophisticated money quietly does about it — NEVER a restatement of the "
+            f"number. Connect the panels so the reader finishes with an insight they did not walk in "
+            f"with. Prefer a specific, timely, less-obvious angle over the obvious headline everyone "
+            f"else is running.\n\n"
+            f"Also write: a scroll-stopping TITLE that states the THESIS, not a generic label "
+            f"(<= 7 words; NOT 'Top 3 Things Moving Your Money' or 'Key Economic Headlines'); an "
+            f"Instagram CAPTION in an intelligent, analytical, confident voice that opens with the "
+            f"thesis, DECODES the data, names the second-order consequences, and ends on a forward "
+            f"question — teaching, not selling (TRUTH > TRUST > VALUE > CLARITY > ENGAGEMENT); and "
+            f"relevant HASHTAGS.\n\n"
             f"{cta_block}\n\n"
             f"HARD RULES: use ONLY figures present in the intelligence — never invent a "
             f"number or a source; education, not individualized advice; no promised returns; "
@@ -809,6 +830,66 @@ class HotTopicReels:
         except Exception as e:  # noqa: BLE001
             logger.debug(f"hot-topic save package failed: {e}")
 
+    # ---- cross-day NOVELTY memory (IBC) -------------------------------------------
+    # Remembers the figures/headlines/angles of recent IBC posts so the compile prompt
+    # can forbid repeats. This is what stops the feed looping the same 3 stats daily.
+    _RECENT_IBC_KEY = "ibc_recent_posts"
+
+    async def _load_recent_ibc(self, db: AsyncSession) -> list:
+        try:
+            row = (await db.execute(
+                select(AutomationState).where(AutomationState.key == self._RECENT_IBC_KEY)
+            )).scalars().first()
+            if row and isinstance(row.data, dict) and isinstance(row.data.get("items"), list):
+                return list(row.data["items"])
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"load recent ibc failed: {e}")
+        return []
+
+    async def _record_recent_ibc(self, db: AsyncSession, panels: list, angle: Optional[str]) -> None:
+        try:
+            items = await self._load_recent_ibc(db)
+            items.append({
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "angle": (angle or "").split(",")[0][:80],
+                "figures": [str(p.get("figure", "")).strip() for p in panels if p.get("figure")],
+                "headlines": [str(p.get("headline", "")).strip() for p in panels if p.get("headline")],
+            })
+            items = items[-12:]  # keep ~several days
+            row = (await db.execute(
+                select(AutomationState).where(AutomationState.key == self._RECENT_IBC_KEY)
+            )).scalars().first()
+            if row:
+                row.data = {"items": items}
+            else:
+                db.add(AutomationState(key=self._RECENT_IBC_KEY, data={"items": items}))
+            await db.flush()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"record recent ibc failed: {e}")
+
+    @staticmethod
+    def _avoid_from_recent(items: list) -> list:
+        """Flatten the last several IBC posts into an AVOID list (figures/headlines/angles)."""
+        avoid: list = []
+        for it in (items or [])[-8:]:
+            for f in (it.get("figures") or []):
+                if f:
+                    avoid.append(f"figure {f}")
+            for h in (it.get("headlines") or []):
+                if h:
+                    avoid.append(f"headline: {h}")
+            a = it.get("angle")
+            if a:
+                avoid.append(f"angle: {a}")
+        seen: set = set()
+        out: list = []
+        for x in avoid:
+            k = x.lower()
+            if k not in seen:
+                seen.add(k)
+                out.append(x)
+        return out
+
     @staticmethod
     def _is_empty_brief(text: str) -> bool:
         """True for the finance engine's 'no new data' message — no facts to compile."""
@@ -876,7 +957,14 @@ class HotTopicReels:
         figures = _figures_for_angle(data_points, _angle_index(rotation)) if data_points else []
         cta_mode = _select_cta(rotation)  # curiosity / engage / funnel — mostly education
         category = _content_category()    # weekly rhythm — the day's content category
-        temperature = 0.7 if brand == "nxg" else 0.4
+        temperature = 0.7 if brand == "nxg" else 0.55
+        # IBC cross-day novelty: forbid repeating recent figures/headlines/angles.
+        avoid: List[str] = []
+        if brand == "ibc":
+            try:
+                avoid = self._avoid_from_recent(await self._load_recent_ibc(db))
+            except Exception:  # noqa: BLE001
+                avoid = []
         if intel is None:
             intel = await self._latest_intel(db)
         if not intel:
@@ -896,7 +984,7 @@ class HotTopicReels:
             try:
                 raw = await claude_client.chat(
                     messages=[{"role": "user", "content": prompt}],
-                    system_prompt=_compile_system(n, brand, tier, angle, figures, cta_mode, category),
+                    system_prompt=_compile_system(n, brand, tier, angle, figures, cta_mode, category, avoid),
                     stream=False,
                     max_tokens=settings.oreilus_report_max_tokens,
                     temperature=temperature,
@@ -1002,6 +1090,9 @@ class HotTopicReels:
                 logger.debug(f"compliance flag record failed: {e}")
 
         await self._save_package(db, package, brand)
+        # Remember this IBC post so the next few days won't repeat its figures/headlines.
+        if brand == "ibc" and clean_panels:
+            await self._record_recent_ibc(db, clean_panels, angle)
         return {"ok": True, "package": package, "brand": brand}
 
     async def compile_brands(self, db: AsyncSession, brands: List[str]) -> Dict:

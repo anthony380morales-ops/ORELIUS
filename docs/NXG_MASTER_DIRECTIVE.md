@@ -48,6 +48,12 @@ Continuously find the weakest stage and strengthen it.
   & retirement rules, banking, business) so no two posts repeat, and it never leads
   with the Fed every day. ORELIUS, ATHENA, and HIGGBOT all follow the weekly category
   rhythm below.
+- **Depth & cross-day novelty (IBC especially):** every briefing must be *profound*, not a
+  number dump: the data points prove ONE non-obvious thesis, and each "meaning" line gives a
+  second-order implication (what it triggers, the trade-off, what sophisticated money does),
+  never a restatement of the figure. ORELIUS keeps a rolling memory of the figures, headlines,
+  and angles used in recent posts (`ibc_recent_posts`) and forbids repeating them, so the feed
+  never loops the same stats day after day.
 - **Visual standard:** every published post carries a fresh, unique, high-quality
   generated background image (fal.ai) baked in, on-theme and realistic, with a
   legibility scrim; centered text; brand logo in place of any text titling; no long
