@@ -330,14 +330,25 @@ _LAYOUT_SCHEMA = {
 }
 
 
-def _layout_system(layout: str, figures: List[str]) -> str:
+def _layout_system(layout: str, figures: List[str], avoid: Optional[List[str]] = None) -> str:
     fig_block = ("Use ONLY these verified figures (never invent a number or source): "
                  + "; ".join(str(f) for f in figures)) if figures else \
         "Use ONLY figures explicitly present in the intelligence; never invent a number or source."
+    avoid_block = ""
+    if avoid:
+        avoid_block = (
+            "\n\nNOVELTY (do NOT repeat recent posts): these figures, headlines, and angles ALREADY "
+            "RAN in the last few days. Do NOT reuse them, do NOT lead with the same numbers, and pick "
+            "a DIFFERENT topic and framing so the feed never loops:\n" + "\n".join(f"• {a}" for a in avoid[:24])
+        )
     return (
         "You are ORELIUS's visual-content builder for NXG Life Group, a trusted financial and "
         "retirement EDUCATION brand. Build ONLY the JSON for " + _LAYOUT_SCHEMA[layout] + "\n\n"
-        + fig_block + "\n\n"
+        + fig_block + avoid_block + "\n\n"
+        "DEPTH (make it PROFOUND, not a data dump): the piece must carry ONE clear, non-obvious "
+        "THESIS, and every point must deliver a second-order implication (what it triggers, the "
+        "trade-off it forces, or what a prepared person does about it), never a bare restatement of "
+        "a number. Lead with the idea, support it with the data.\n\n"
         "HARD RULES: education only, not individualized advice; no guarantees or hype; attribute "
         "real sources; keep every line tight, plain, and scroll-stopping; NEVER use a double hyphen "
         "or any long dash (no '--', no em dash, no en dash), use commas or periods. Return ONLY the "
@@ -457,14 +468,15 @@ def _validate_layout(layout: str, obj: Dict) -> Optional[Dict]:
     return None
 
 
-async def _compile_nxg_layout(layout: str, intel: str, figures: List[str], temperature: float) -> Optional[Dict]:
+async def _compile_nxg_layout(layout: str, intel: str, figures: List[str], temperature: float,
+                              avoid: Optional[List[str]] = None) -> Optional[Dict]:
     """One tightly-scoped model call to build a layout's structure. None on any issue."""
     prompt = ("From this compiled economic intelligence, build the layout JSON per your rules:\n\n" + intel)
     for _ in range(2):
         try:
             raw = await claude_client.chat(
                 messages=[{"role": "user", "content": prompt}],
-                system_prompt=_layout_system(layout, figures),
+                system_prompt=_layout_system(layout, figures, avoid),
                 stream=False,
                 max_tokens=settings.oreilus_report_max_tokens,
                 temperature=temperature,
@@ -478,6 +490,34 @@ async def _compile_nxg_layout(layout: str, intel: str, figures: List[str], tempe
             if cleaned:
                 return cleaned
     return None
+
+
+def _nxg_layout_headlines(package: Dict) -> List[str]:
+    """Pull the key headline/label strings out of whichever NXG layout was compiled,
+    so cross-day novelty memory can forbid repeating them. Best-effort, never raises."""
+    out: List[str] = []
+    try:
+        _KEYS = {"headline", "label", "herotitle", "title", "question", "personaname", "lefttitle", "righttitle"}
+
+        def walk(x):
+            if isinstance(x, str):
+                return
+            if isinstance(x, dict):
+                for k, v in x.items():
+                    if isinstance(v, str) and k.lower() in _KEYS and v.strip():
+                        out.append(v.strip())
+                    else:
+                        walk(v)
+            elif isinstance(x, list):
+                for v in x:
+                    walk(v)
+
+        for key in ("briefing", "compareColumns", "analysis", "news", "scenario", "interactive"):
+            if package.get(key):
+                walk(package[key])
+    except Exception:  # noqa: BLE001
+        pass
+    return out[:8]
 
 
 def _angle_index(rotation: Optional[int]) -> int:
@@ -670,7 +710,7 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"- The worry they carry: {tier['emotional_core']}\n"
             f"- How NXG solves it: {tier['product_angle']}\n"
             f"- What matters to them: {tier['promise']}\n\n"
-            f"THIS POST'S TOPIC (so every post today is DISTINCT): {angle}.\n"
+            f"THIS POST'S TOPIC (so every post today is DISTINCT): {angle}.{avoid_block}\n"
             f"Your anchor is ONE specific, verified development for THIS topic: use an exact "
             f"figure from the VERIFIED FIGURES BELOW when listed; if none are listed for this "
             f"topic, anchor on one specific, recent, verified development from the intelligence "
@@ -830,46 +870,50 @@ class HotTopicReels:
         except Exception as e:  # noqa: BLE001
             logger.debug(f"hot-topic save package failed: {e}")
 
-    # ---- cross-day NOVELTY memory (IBC) -------------------------------------------
-    # Remembers the figures/headlines/angles of recent IBC posts so the compile prompt
-    # can forbid repeats. This is what stops the feed looping the same 3 stats daily.
-    _RECENT_IBC_KEY = "ibc_recent_posts"
+    # ---- cross-day NOVELTY memory (BOTH brands) -----------------------------------
+    # Remembers the figures/headlines/angles of recent posts (per brand) so the compile
+    # prompt can forbid repeats. This is what stops EITHER feed looping the same data.
+    @staticmethod
+    def _recent_key(brand: str) -> str:
+        return f"{_resolve_brand(brand)}_recent_posts"
 
-    async def _load_recent_ibc(self, db: AsyncSession) -> list:
+    async def _load_recent(self, db: AsyncSession, brand: str) -> list:
         try:
             row = (await db.execute(
-                select(AutomationState).where(AutomationState.key == self._RECENT_IBC_KEY)
+                select(AutomationState).where(AutomationState.key == self._recent_key(brand))
             )).scalars().first()
             if row and isinstance(row.data, dict) and isinstance(row.data.get("items"), list):
                 return list(row.data["items"])
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"load recent ibc failed: {e}")
+            logger.debug(f"load recent {brand} failed: {e}")
         return []
 
-    async def _record_recent_ibc(self, db: AsyncSession, panels: list, angle: Optional[str]) -> None:
+    async def _record_recent(self, db: AsyncSession, brand: str,
+                             figures: list, headlines: list, angle: Optional[str]) -> None:
         try:
-            items = await self._load_recent_ibc(db)
+            items = await self._load_recent(db, brand)
             items.append({
                 "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "angle": (angle or "").split(",")[0][:80],
-                "figures": [str(p.get("figure", "")).strip() for p in panels if p.get("figure")],
-                "headlines": [str(p.get("headline", "")).strip() for p in panels if p.get("headline")],
+                "figures": [str(f).strip() for f in (figures or []) if str(f).strip()][:6],
+                "headlines": [str(h).strip() for h in (headlines or []) if str(h).strip()][:6],
             })
             items = items[-12:]  # keep ~several days
+            key = self._recent_key(brand)
             row = (await db.execute(
-                select(AutomationState).where(AutomationState.key == self._RECENT_IBC_KEY)
+                select(AutomationState).where(AutomationState.key == key)
             )).scalars().first()
             if row:
                 row.data = {"items": items}
             else:
-                db.add(AutomationState(key=self._RECENT_IBC_KEY, data={"items": items}))
+                db.add(AutomationState(key=key, data={"items": items}))
             await db.flush()
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"record recent ibc failed: {e}")
+            logger.debug(f"record recent {brand} failed: {e}")
 
     @staticmethod
     def _avoid_from_recent(items: list) -> list:
-        """Flatten the last several IBC posts into an AVOID list (figures/headlines/angles)."""
+        """Flatten the last several posts into an AVOID list (figures/headlines/angles)."""
         avoid: list = []
         for it in (items or [])[-8:]:
             for f in (it.get("figures") or []):
@@ -958,13 +1002,12 @@ class HotTopicReels:
         cta_mode = _select_cta(rotation)  # curiosity / engage / funnel — mostly education
         category = _content_category()    # weekly rhythm — the day's content category
         temperature = 0.7 if brand == "nxg" else 0.55
-        # IBC cross-day novelty: forbid repeating recent figures/headlines/angles.
+        # Cross-day novelty (BOTH brands): forbid repeating recent figures/headlines/angles.
         avoid: List[str] = []
-        if brand == "ibc":
-            try:
-                avoid = self._avoid_from_recent(await self._load_recent_ibc(db))
-            except Exception:  # noqa: BLE001
-                avoid = []
+        try:
+            avoid = self._avoid_from_recent(await self._load_recent(db, brand))
+        except Exception:  # noqa: BLE001
+            avoid = []
         if intel is None:
             intel = await self._latest_intel(db)
         if not intel:
@@ -1056,7 +1099,7 @@ class HotTopicReels:
             attach = None
             if layout != "hero":
                 try:
-                    attach = await _compile_nxg_layout(layout, intel, figures, temperature)
+                    attach = await _compile_nxg_layout(layout, intel, figures, temperature, avoid)
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"nxg layout '{layout}' failed, using hero: {e}")
             if attach:
@@ -1090,9 +1133,21 @@ class HotTopicReels:
                 logger.debug(f"compliance flag record failed: {e}")
 
         await self._save_package(db, package, brand)
-        # Remember this IBC post so the next few days won't repeat its figures/headlines.
+        # Remember this post so the next few days won't repeat its figures/headlines/angle.
         if brand == "ibc" and clean_panels:
-            await self._record_recent_ibc(db, clean_panels, angle)
+            await self._record_recent(
+                db, brand,
+                figures=[p.get("figure", "") for p in clean_panels],
+                headlines=[p.get("headline", "") for p in clean_panels],
+                angle=angle,
+            )
+        elif brand == "nxg":
+            await self._record_recent(
+                db, brand,
+                figures=package.get("facts", []),
+                headlines=[package.get("title", "")] + _nxg_layout_headlines(package),
+                angle=angle,
+            )
         return {"ok": True, "package": package, "brand": brand}
 
     async def compile_brands(self, db: AsyncSession, brands: List[str]) -> Dict:

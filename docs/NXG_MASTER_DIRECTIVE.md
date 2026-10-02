@@ -48,12 +48,16 @@ Continuously find the weakest stage and strengthen it.
   & retirement rules, banking, business) so no two posts repeat, and it never leads
   with the Fed every day. ORELIUS, ATHENA, and HIGGBOT all follow the weekly category
   rhythm below.
-- **Depth & cross-day novelty (IBC especially):** every briefing must be *profound*, not a
-  number dump: the data points prove ONE non-obvious thesis, and each "meaning" line gives a
-  second-order implication (what it triggers, the trade-off, what sophisticated money does),
-  never a restatement of the figure. ORELIUS keeps a rolling memory of the figures, headlines,
-  and angles used in recent posts (`ibc_recent_posts`) and forbids repeating them, so the feed
-  never loops the same stats day after day.
+- **Depth & cross-day novelty (BOTH brands, no exceptions):** every post must be *profound*,
+  not a number dump: it proves ONE non-obvious thesis, and every point delivers a second-order
+  implication (what it triggers, the trade-off, what a prepared person does), never a restatement
+  of the figure. ORELIUS keeps a rolling per-brand memory of the figures, headlines, and angles
+  used in recent posts (`ibc_recent_posts`, `nxg_recent_posts`) and injects an AVOID list into
+  both the caption compiler and the NXG layout compiler, so **neither feed repeats a stat, angle,
+  or framing from the prior days.** No two posts, on either page, are the same idea reworded.
+- **Layout integrity (no overlap, ever):** every rendered card auto-fits — the title shrinks to
+  at most two lines and the content scales to its track — so text never overlaps, clips, or spills,
+  whatever length ORELIUS sends. Enforced in each ATHENA card renderer.
 - **Visual standard:** every published post carries a fresh, unique, high-quality
   generated background image (fal.ai) baked in, on-theme and realistic, with a
   legibility scrim; centered text; brand logo in place of any text titling; no long
@@ -90,6 +94,9 @@ prioritize → compile** the day's content packages (distinct angle + income tie
 exact verified figures per post), drops the morning brief + plan to the Master, and
 dispatches to ATHENA on schedule. Owns the content doctrine above. Measures and
 feeds results back. Never invents figures; never lets a post become a pitch.
+**DUTY: novelty + depth on every post, both pages.** Checks the per-brand recent-post
+memory and refuses to repeat a recent figure, angle, or framing; every post proves one
+non-obvious thesis with second-order insight, never a reworded rerun.
 
 ### LUCIUS — Shared-memory & coordination hub
 The system's nervous system and record. Carries jobs and results between ORELIUS,
@@ -103,6 +110,9 @@ Takes ORELIUS's package, renders the account's own branded asset, hosts it (R2),
 runs the quality/compliance gate, and **publishes to the correct account/platform**,
 reporting the result back through LUCIUS. Enforces per-account daily limits and the
 "never wrong-brand" rule.
+**DUTY: every card ships with a fresh generated background (mandatory, no flat posts)
+and passes the auto-fit gate so text never overlaps or clips.** Also emails the Master a
+copy of each post (image/reel attached) as it goes out.
 - **NXG → Facebook:** fully auto-published on schedule.
 - **IBC → Instagram (reel, hand-off):** because Instagram's in-app licensed music
   can't be attached via the API, IBC runs in PREPARE-ONLY mode — ATHENA builds the
