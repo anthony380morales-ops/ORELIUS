@@ -55,6 +55,9 @@ Continuously find the weakest stage and strengthen it.
   used in recent posts (`ibc_recent_posts`, `nxg_recent_posts`) and injects an AVOID list into
   both the caption compiler and the NXG layout compiler, so **neither feed repeats a stat, angle,
   or framing from the prior days.** No two posts, on either page, are the same idea reworded.
+  Each slot is also anchored to a DISTINCT rotating topic (housing, taxes, markets, Social
+  Security, jobs, debt, ...), the NXG layout build included, so same-day posts differ by SUBJECT,
+  never a reworded take on the day's loudest story.
 - **Layout integrity (no overlap, ever):** every rendered card auto-fits — the title shrinks to
   at most two lines and the content scales to its track — so text never overlaps, clips, or spills,
   whatever length ORELIUS sends. Enforced in each ATHENA card renderer.

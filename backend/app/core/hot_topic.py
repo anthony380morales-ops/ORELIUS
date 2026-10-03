@@ -330,10 +330,19 @@ _LAYOUT_SCHEMA = {
 }
 
 
-def _layout_system(layout: str, figures: List[str], avoid: Optional[List[str]] = None) -> str:
+def _layout_system(layout: str, figures: List[str], avoid: Optional[List[str]] = None,
+                   angle: Optional[str] = None) -> str:
     fig_block = ("Use ONLY these verified figures (never invent a number or source): "
                  + "; ".join(str(f) for f in figures)) if figures else \
         "Use ONLY figures explicitly present in the intelligence; never invent a number or source."
+    angle_block = ""
+    if angle:
+        angle_block = (
+            "\n\nFOCUS THIS ENTIRE PIECE ON ONE TOPIC (so each slot's post is a DIFFERENT subject, "
+            "not a reworded version of the loudest headline): " + angle + ". Build the whole layout "
+            "around that topic; if the intelligence is thin on it, anchor on the most relevant "
+            "verified development within it. Do NOT default to the day's dominant story."
+        )
     avoid_block = ""
     if avoid:
         avoid_block = (
@@ -344,7 +353,7 @@ def _layout_system(layout: str, figures: List[str], avoid: Optional[List[str]] =
     return (
         "You are ORELIUS's visual-content builder for NXG Life Group, a trusted financial and "
         "retirement EDUCATION brand. Build ONLY the JSON for " + _LAYOUT_SCHEMA[layout] + "\n\n"
-        + fig_block + avoid_block + "\n\n"
+        + fig_block + angle_block + avoid_block + "\n\n"
         "DEPTH (make it PROFOUND, not a data dump): the piece must carry ONE clear, non-obvious "
         "THESIS, and every point must deliver a second-order implication (what it triggers, the "
         "trade-off it forces, or what a prepared person does about it), never a bare restatement of "
@@ -469,14 +478,14 @@ def _validate_layout(layout: str, obj: Dict) -> Optional[Dict]:
 
 
 async def _compile_nxg_layout(layout: str, intel: str, figures: List[str], temperature: float,
-                              avoid: Optional[List[str]] = None) -> Optional[Dict]:
+                              avoid: Optional[List[str]] = None, angle: Optional[str] = None) -> Optional[Dict]:
     """One tightly-scoped model call to build a layout's structure. None on any issue."""
     prompt = ("From this compiled economic intelligence, build the layout JSON per your rules:\n\n" + intel)
     for _ in range(2):
         try:
             raw = await claude_client.chat(
                 messages=[{"role": "user", "content": prompt}],
-                system_prompt=_layout_system(layout, figures, avoid),
+                system_prompt=_layout_system(layout, figures, avoid, angle),
                 stream=False,
                 max_tokens=settings.oreilus_report_max_tokens,
                 temperature=temperature,
@@ -1099,7 +1108,7 @@ class HotTopicReels:
             attach = None
             if layout != "hero":
                 try:
-                    attach = await _compile_nxg_layout(layout, intel, figures, temperature, avoid)
+                    attach = await _compile_nxg_layout(layout, intel, figures, temperature, avoid, angle)
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"nxg layout '{layout}' failed, using hero: {e}")
             if attach:
