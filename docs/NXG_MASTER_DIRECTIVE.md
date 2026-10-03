@@ -167,4 +167,34 @@ ecosystem → assess → request a conversation → qualified opportunities rout
 efficiently → human team closes → referrals → partners → more distribution → better
 data → better content → higher lead quality → more business → better margin.
 
+## WEEKLY VIDEO — "THE NXG METHOD" (one shoot, both pages)
+A single 60-second vertical (9:16, aim 50s) video ships ONCE a week and posts to BOTH
+pages (NXG Facebook + IBC Instagram), to grow video reach at near-zero marginal cost.
+World: **wealth-noir** — the economy is the antagonist, your own private bank is the
+escape; hero = **The Architect** (the Master, on camera); villain = **The System**.
+Look is locked: near-black ground, vault-gold accent, danger-red for the threat only,
+one-word-at-a-time title cards, slow push-ins. Sign-off every time: "This is how
+dynasties are built. — NXG." CTA: DM "VAULT".
+
+**The 60s engine (5 beats):** Threat (0-5s) → Trap (5-15s) → Method (15-40s, teach ONE
+IBC/IUL/cash-value idea) → Proof (40-52s, one concrete number) → Legacy (52-60s, sign-off
++ open loop + CTA). Educational, intriguing, deadpan-relatable, compliant (licensed CA
+agent: educational only, no guarantees/returns language).
+
+**Duties:**
+- **ORELIUS** writes the weekly script to the 5-beat engine (VO lines + one-word caption
+  cards + the one verified number), under the same novelty rule (never repeat a prior
+  week's angle/number), and hands it to the Master to record. It perfects the *relay of
+  the message* — tightening wording so the read lands.
+- **The Master** records his own voice to that script (authenticity + compliance).
+- **ATHENA** assembles the video (`buildNxgMethodVideo`, ffmpeg, ~$0): the Architect hero
+  still + gold-on-black kinetic caption cards + the Master's voice, which ATHENA MASTERS
+  (warmth + presence EQ, compression, de-ess, loudness to -14 LUFS) so a plain take sounds
+  full and deliberate; optional ducked music bed. Exports one clean 9:16 master (no
+  watermark/handle) for both pages; per-page caption/first-comment only (NXG = legacy
+  angle, IBC = economic-intelligence angle).
+- **HIGGBOT (premium, later):** optional true image-to-video motion + wardrobe/style
+  variation of the Architect (Higgsfield), enabled only when budget allows — the base
+  pipeline never depends on it.
+
 **NXG LIFE GROUP — Protect. Retire. Build. Financial Intelligence for the Next Chapter.**
