@@ -185,6 +185,14 @@ music into one clean 9:16 ≤60s master (`buildNxgMethodVideo` for the edit/capt
 A full episode is ~$1-2 of fal — minimal marginal cost. If any fal video call fails, the
 cut falls back to the ffmpeg still layer so a post is never blocked.
 
+**Injected prompt + status:** the BLUEPRINTS world and 5-beat episode prompt live in
+`backend/app/core/blueprints.py` (`compile_blueprints_episode` writes the weekly beats +
+VO lines + b-roll shot prompts + old-money wardrobe, under the novelty rule). ATHENA's
+`buildBlueprintsEpisode` orchestrates the render. The cinematic (fal) layer activates the
+moment FAL credits are funded; until then the orchestrator produces the still-layer cut.
+The weekly auto-publish SCHEDULE is wired on only after the Master approves the episode
+storyline (he reviews the example first) — so the series never auto-posts an unapproved cut.
+
 ### (legacy framing) 60-second structure
 A single 60-second vertical (9:16, aim 50s) video ships ONCE a week and posts to BOTH
 pages (NXG Facebook + IBC Instagram), to grow video reach at near-zero marginal cost.
