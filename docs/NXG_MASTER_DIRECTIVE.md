@@ -167,7 +167,25 @@ ecosystem → assess → request a conversation → qualified opportunities rout
 efficiently → human team closes → referrals → partners → more distribution → better
 data → better content → higher lead quality → more business → better margin.
 
-## WEEKLY VIDEO — "THE NXG METHOD" (one shoot, both pages)
+## WEEKLY VIDEO — "BLUEPRINTS" (cinematic, AI-generated, one episode a week, both pages)
+The weekly series is **BLUEPRINTS** (old-money / wealth-noir). Episodes are CINEMATIC and
+MOVING — not stills: multiple shots, the Master rendered in motion with his **lips synced
+to his own voiceover**, fresh **old-money** wardrobe each week, big one-word title cards
+(KUMAR-style), dark + gold palette. Reference studied: the KUMAR repo screen recordings
+(one hard key light, multi-shot cuts, burning-cash hero, in-world cutaways, red kinetic words).
+
+**Engine (cost-minimal, NOT Higgsfield):** fal.ai video (same funded FAL_API_KEY as image
+gen), via `falVideo.ts`:
+- `falTalkingHead(portrait, voiceover)` — lip-synced talking shots of the Master (MiniMax
+  H3 lip-sync, image->video); ~$0.08/s. Also MuseTalk (~free) / LatentSync ($0.20 flat).
+- `falImageToVideo(image, prompt)` — motion + b-roll (LTX-2 Fast ~$0.04/s).
+- Wardrobe stills of the Master (old-money) via the existing fal image gen, face-referenced.
+ATHENA assembles the clips + red/gold one-word title cards + the Master's MASTERED voice +
+music into one clean 9:16 ≤60s master (`buildNxgMethodVideo` for the edit/caption layer).
+A full episode is ~$1-2 of fal — minimal marginal cost. If any fal video call fails, the
+cut falls back to the ffmpeg still layer so a post is never blocked.
+
+### (legacy framing) 60-second structure
 A single 60-second vertical (9:16, aim 50s) video ships ONCE a week and posts to BOTH
 pages (NXG Facebook + IBC Instagram), to grow video reach at near-zero marginal cost.
 World: **wealth-noir** — the economy is the antagonist, your own private bank is the
