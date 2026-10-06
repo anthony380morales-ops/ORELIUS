@@ -358,6 +358,10 @@ def _layout_system(layout: str, figures: List[str], avoid: Optional[List[str]] =
         "THESIS, and every point must deliver a second-order implication (what it triggers, the "
         "trade-off it forces, or what a prepared person does about it), never a bare restatement of "
         "a number. Lead with the idea, support it with the data.\n\n"
+        "HOOK (California lens): the hero line / title must state the EVERYDAY CONSEQUENCE for a "
+        "Californian (what this does to a CA family's paycheck, home, rent, savings, or "
+        "retirement), NOT a raw statistic. Put numbers in the stat/figure fields as PROOF, never "
+        "as the headline.\n\n"
         "HARD RULES: education only, not individualized advice; no guarantees or hype; attribute "
         "real sources; keep every line tight, plain, and scroll-stopping; NEVER use a double hyphen "
         "or any long dash (no '--', no em dash, no en dash), use commas or periods. Return ONLY the "
@@ -677,6 +681,16 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             "not sold to."
         )
 
+    # EVERY post ends with ONE concrete micro-action (save / share / follow) — the single
+    # biggest gap vs viral finance pages (NXG: 0 follows all month; IBC: ~2 interactions).
+    # Appended to whatever CTA mode is active so no post ever ends without an ask.
+    cta_block += (
+        "\n\nALWAYS, on top of the above, end with ONE concrete, natural micro-action tied to "
+        "THIS post's topic: SAVE it (name the exact moment it will matter), SHARE/SEND it to a "
+        "specific person it helps, or FOLLOW for the next one. One line, specific, never stacked, "
+        "never salesy."
+    )
+
     # Exact verified figures for this post's angle — the ONLY numbers the model may use.
     fig_block = ""
     if figures:
@@ -713,6 +727,13 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"market analysis. You write raw, human, story-led Facebook posts that EDUCATE and "
             f"make a real person feel understood — that is how NXG earns trust without pitching.\n\n"
             f"{category_block}{trust_rule}{compliance_rule}"
+            f"CALIFORNIA LENS (non-negotiable): NXG is deliberately narrowed to CALIFORNIANS. "
+            f"Every post must translate the economic development into how it hits a real "
+            f"California household's everyday life — the cost of a California home or rent, a "
+            f"California paycheck and taxes, CalSavers, local cost of living, a CA family's "
+            f"retirement. Name California (or a California city/region) explicitly where it is "
+            f"honest to do so. NXG is NOT a national number feed; it is the California everyday-"
+            f"impact lens.\n\n"
             f"TODAY YOU ARE WRITING FOR THIS PERSON:\n"
             f"- Tier: {tier['label']}\n"
             f"- Who they are: {tier['audience']}\n"
@@ -732,9 +753,12 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"same anchor. Weave that single real fact in naturally, in plain human words — the "
             f"spark, not a lecture. Do NOT list multiple stats, and NEVER invent a number.{fig_block}\n\n"
             f"CRITICAL: the FIRST item in your \"facts\" array is used verbatim as the post's "
-            f"IMAGE HEADLINE, so it must be that ONE angle-specific development stated as a "
-            f"short, punchy, human line (<= 14 words) — never the Fed rate unless this is the "
-            f"rates angle, never a generic slogan.\n\n"
+            f"IMAGE HEADLINE. It must be the EVERYDAY-LIFE STAKE for a Californian — the human "
+            f"consequence of this development (what it does to a real CA family's paycheck, home, "
+            f"rent, savings, or retirement), stated as a short, punchy line (<= 14 words). Do NOT "
+            f"put a raw statistic in the headline; the number is the PROOF and belongs inside the "
+            f"caption body. Never the Fed rate unless this is the rates angle, never a generic "
+            f"slogan, and never a reworded version of a headline that already ran.\n\n"
             f"You are an EDUCATOR, not a salesperson. This post's job is to make the reader "
             f"feel understood and a little more informed — to earn trust, not to pitch. "
             f"Hierarchy: TRUTH > TRUST > VALUE > CLARITY > ENGAGEMENT. Never sell a product, "
@@ -776,6 +800,11 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             f"in the economy and what it MEANS for money decisions. You are NOT a consumer "
             f"life-insurance page and you do not write emotional family stories.\n\n"
             f"{category_block}{trust_rule}{compliance_rule}"
+            f"EVERYDAY-IMPACT LENS (US, non-negotiable): IBC is NOT a raw number feed. Every "
+            f"briefing must decode what the data means for how everyday Americans live — "
+            f"paychecks, prices, rent and housing, jobs, savings, debt, retirement. The thesis "
+            f"and each panel lead with that human stake; the FIGURE is the PROOF, never the hook. "
+            f"IBC is the broad US lens (nationwide), the complement to NXG's California lens.\n\n"
             f"THIS POST'S ANGLE (focus the ENTIRE briefing on this theme, so it is distinct "
             f"from other posts today): {angle}.{fig_block}{avoid_block}\n\n"
             f"Build a BRIEFING GRAPHIC of the {n} most impactful VERIFIED data points WITHIN "
@@ -785,7 +814,8 @@ def _compile_system(n: int, brand: str = "ibc", tier: Optional[Dict] = None,
             + f". For EACH point give: the hard "
             f"FIGURE (the exact number/percent/level), a short LABEL "
             f"(e.g. 'CPI · YoY', '10-YR TREASURY', 'FED FUNDS'), a punchy HEADLINE (3-6 "
-            f"words), and one line on what it MEANS.\n\n"
+            f"words) that states the EVERYDAY HUMAN STAKE (what it does to real people, not a "
+            f"restatement of the figure), and one line on what it MEANS.\n\n"
             f"DEPTH (make it PROFOUND, not a number dump): the {n} data points must together "
             f"prove ONE non-obvious THESIS about where money is moving and why — the throughline "
             f"a sharp analyst would draw, not three disconnected stats. For EACH point, the MEANING "
@@ -980,6 +1010,17 @@ class HotTopicReels:
                 return s
         except Exception as e:  # noqa: BLE001
             logger.debug(f"hot-topic stored intel read failed: {e}")
+
+        # GOVERNMENT-SOURCE FALLBACK (directive): if no fresh news landed this cycle, build
+        # a brief from the current standing official figures (Fed/FRED, Treasury, BEA, FDIC)
+        # so a post still ships with real, verified US-government data instead of going silent.
+        try:
+            gov = await finance_intel.gov_fallback_briefing()
+            if gov and len(gov.strip()) > 200 and not self._is_empty_brief(gov):
+                logger.info("hot-topic: using government-source fallback briefing (no fresh news)")
+                return gov
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"hot-topic gov fallback failed: {e}")
 
         return live  # may be empty / an 'empty brief' — caller handles gracefully
 

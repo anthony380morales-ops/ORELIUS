@@ -473,6 +473,32 @@ class FinanceIntel:
                 "service didn't respond. The official data feeds are still tracked; try me "
                 "again shortly and I'll have the latest developments stacked for you.")
 
+    async def gov_fallback_briefing(self) -> str:
+        """Last-resort brief from the CURRENT standing figures on official US government
+        sources (FRED/Federal Reserve, Treasury, BEA, FDIC), with NO no-repeat filter.
+
+        Used when no fresh economic news is found this cycle (directive: never go silent —
+        pull the biggest headline from the most trustworthy US-government sources). This
+        guarantees a post still ships with real, verified, government-sourced data instead
+        of nothing. Returns "" only if the official feeds themselves are unreachable.
+        """
+        try:
+            items = await self._gather_all()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"gov fallback gather failed: {e}")
+            items = []
+        if not items:
+            return ""
+        by_source = self._group_by_source(items)
+        lookback = max(1, int(getattr(settings, "finance_lookback_days", 60)))
+        try:
+            # Pass the full current snapshot as "fresh" so it synthesizes a real briefing
+            # from standing official figures rather than the "nothing to repeat" message.
+            return await self._fallback_numeric_brief(by_source, items, lookback)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"gov fallback synthesis failed: {e}")
+            return ""
+
     async def data_snapshot(self) -> Dict[str, list]:
         """A structured snapshot of the current verified figures, grouped by source
         ({source: [{metric,value,unit,date,change_vs_prior}...]}). Used by the post

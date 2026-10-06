@@ -30,6 +30,22 @@ Continuously find the weakest stage and strengthen it.
   question or micro-commitment (save/share/answer), **no link**. Only a minority
   invite the funnel (comment `CLARITY` → free resource). This is enforced in code by
   the CTA rotation (`_select_cta`: curiosity / engage / funnel, education-weighted).
+- **Explicit micro-action on EVERY post (save / share / follow):** on top of the
+  rotating CTA above, every post — both brands — now ends with ONE concrete, natural
+  action tied to that post's topic: SAVE it (for the moment it will matter), SHARE/SEND
+  it to a specific person it helps, or FOLLOW for the next one. This closes the single
+  biggest gap found in the lifetime audit (NXG: **0 follows all month**; IBC: ~2
+  interactions). Enforced in code: the universal micro-action is appended to every
+  `cta_block` in `_compile_system`.
+- **Everyday-impact lens (the thesis of both pages):** NXG and IBC are **not** number
+  feeds. Every post leads with the **human, everyday-life STAKE** of a development; the
+  figure is the **PROOF inside**, never the headline. The two pages split the lens:
+  **NXG = California** — deliberately narrowed to how it hits a real Californian's
+  paycheck, home, rent, savings, CalSavers, retirement; name California where honest.
+  **IBC = broad US** — how it hits everyday Americans nationwide. Enforced in code: a
+  CALIFORNIA LENS block + human-stake image headline in NXG's `_compile_system` and
+  `_layout_system`; an EVERYDAY-IMPACT (US) LENS block + stake-led panel headlines in
+  IBC's `_compile_system`. Goal: a viral infographic source page, not a statistics dump.
 - **Five content pillars:** Financial Intelligence · Retirement Problems ·
   Retirement Education · Scenarios/Case Studies · Interactive.
 - **One idea → many assets** (§11): each research topic becomes a cluster across
@@ -42,7 +58,11 @@ Continuously find the weakest stage and strengthen it.
   articles, then sweeping reputable press (Reuters, AP, WSJ, Bloomberg, MarketWatch,
   Kiplinger) and official/primary sources (Fed, BLS, Treasury, BEA, SSA, IRS). When the
   usual data endpoints show nothing new, it uses **verified web search** for real,
-  cited, factual developments — never fabricating or padding with the same story. The
+  cited, factual developments — never fabricating or padding with the same story. **If
+  a cycle still finds no fresh news, ORELIUS never goes silent: it falls back to a brief
+  built from the current standing figures on the most trustworthy US-government sources
+  (Fed/FRED, Treasury, BEA, FDIC) via `finance_intel.gov_fallback_briefing()`, so a post
+  always ships with real, verified data instead of nothing.** The
   content is **NOT** limited to the Fed and rate changes: it rotates a wide theme set
   (rates, inflation, jobs/wages, housing, markets, debt/credit, Social Security, taxes
   & retirement rules, banking, business) so no two posts repeat, and it never leads
@@ -100,6 +120,11 @@ feeds results back. Never invents figures; never lets a post become a pitch.
 **DUTY: novelty + depth on every post, both pages.** Checks the per-brand recent-post
 memory and refuses to repeat a recent figure, angle, or framing; every post proves one
 non-obvious thesis with second-order insight, never a reworded rerun.
+**DUTY: everyday-impact hook + explicit micro-action.** Leads every post with the human
+everyday-life STAKE (NXG = California lens; IBC = broad US lens), keeps the number as the
+proof inside, and closes every post with a save/share/follow micro-action. **DUTY: never
+go silent** — when no fresh news is found, compile from the US-government standing-figure
+fallback (`gov_fallback_briefing`) rather than skipping a slot.
 
 ### LUCIUS — Shared-memory & coordination hub
 The system's nervous system and record. Carries jobs and results between ORELIUS,
@@ -129,6 +154,9 @@ Turns the package into the **visual**: cinematic human photo-hero for NXG (fal/F
 the multi-panel economic-intelligence briefing graphic for IBC, and future
 landing-page/creative assets. Premium, on-brand, centered, credible — never a
 data-dump, never a template with the prompt showing.
+**DUTY: render the hook as the headline, the number as proof.** The card's hero/title
+carries the everyday-life stake ORELIUS wrote (never a raw statistic as the headline);
+figures render in the stat/figure fields as supporting proof.
 
 **MANDATORY BACKGROUND DIRECTIVE (every post, no exceptions):** every single post
 that ATHENA/HIGGBOT publish — for NXG and IBC alike — MUST have a fresh, unique,
